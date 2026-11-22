@@ -1,0 +1,29 @@
+{
+  "skill_name": "explainer-decks",
+  "evals": [
+    {
+      "id": 1,
+      "skill": "pixel-deck",
+      "prompt": "Make me a 5-slide pixel-art deck for a 5-minute lightning talk: how HTTPS keeps a login safe (TLS handshake, certificate check, encrypted session). Retro game style please, and I need a PDF to upload.",
+      "expected_output": "One deck.html copied from the pixel-deck template with 5 slides, each with a visible title and one animated scene built from the sprite library (user, laptop, server, lock, key, document), correct facts about the TLS handshake and certificate check, no text under the type floor (body 28px, captions 24px, labels 22px on the 1920x1080 stage). shoot.mjs was run: 5 PNGs and a 5-page PDF, and every PNG was read; overlaps or clipped text were fixed before reporting."
+    },
+    {
+      "id": 2,
+      "skill": "block-deck",
+      "prompt": "I'm presenting our new architecture at the team meeting: API gateway, three services, a cache and a Postgres primary with one replica. Can you make slides with isometric blocks that show a read request hitting the cache, a cache miss going to the replica, and a write going to the primary?",
+      "expected_output": "A deck.html from the block-deck template with one slide per idea: the layout, a cache hit, a miss served by the replica, a write to the primary and replication, and a takeaway. Each component is a coloured block (one hue per role) with an HTML tag label; requests are tokens moving along floor paths; painter's order is correct while tokens move. Final-state PNGs and a PDF from shoot.mjs were read and fixed. Nothing is copied from monochrome technical-isometric styles."
+    },
+    {
+      "id": 3,
+      "skill": "pixel-deck",
+      "prompt": "Turn this outline into slides in the pixel style: 1) what a hash map is 2) collisions 3) chaining vs open addressing 4) resizing at load factor 0.75.",
+      "expected_output": "4 or 5 slides that follow the outline, with animated scenes that are technically correct (buckets, a collision, a chain growing, probing to the next slot, a resize that rehashes into twice the buckets when the load factor passes 0.75). Uses #s=N&t=end shots to check final states, and the reduced-motion final state reads on its own."
+    },
+    {
+      "id": 4,
+      "skill": "block-deck",
+      "prompt": "Give me a single title slide plus one diagram slide in the block style explaining a CDN, and keep it calm, no flashy motion.",
+      "expected_output": "Two slides only. The diagram slide uses a few chunky blocks (users, edge nodes, origin) and short eased motion of tokens; it respects prefers-reduced-motion. Labels are readable at the type floor. The answer gives the file path, the PNGs and the PDF."
+    }
+  ]
+}

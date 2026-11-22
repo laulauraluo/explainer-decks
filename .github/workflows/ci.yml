@@ -1,0 +1,26 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-repo.mjs
+      - name: Shoot every example deck (PNG per slide + PDF)
+        run: |
+          for deck in skills/*/examples/*/deck.html; do
+            node "$(dirname "$deck")/../../scripts/shoot.mjs" "$deck" --out "shots/$(basename "$(dirname "$deck")")"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deck-shots
+          path: shots/

@@ -1,0 +1,12 @@
+{
+  "name": "explainer-decks",
+  "description": "Two Agent Skills for animated explainer slide decks: pixel-deck (16-bit RPG pixel style) and block-deck (isometric toy-block dioramas).",
+  "owner": { "name": "laulauraluo" },
+  "plugins": [
+    {
+      "name": "explainer-decks",
+      "source": "./",
+      "description": "Animated explainer slide decks in two styles: pixel-deck and block-deck. One HTML file per deck, PNG and PDF export."
+    }
+  ]
+}

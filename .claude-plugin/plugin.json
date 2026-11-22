@@ -1,0 +1,9 @@
+{
+  "name": "explainer-decks",
+  "version": "0.1.0",
+  "description": "Animated explainer slide decks in two styles: pixel-deck and block-deck. One HTML file per deck, PNG and PDF export.",
+  "author": { "name": "laulauraluo" },
+  "repository": "https://github.com/laulauraluo/explainer-decks",
+  "license": "MIT",
+  "keywords": ["slides", "presentation", "deck", "pixel-art", "isometric", "explainer", "agent-skills", "claude-code", "codex", "cursor"]
+}

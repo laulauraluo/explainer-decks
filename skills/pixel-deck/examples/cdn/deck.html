@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a CDN serves a request</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=Pixelify+Sans:wght@500;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+/* ===== pixel-deck engine styles: edit tokens freely, keep the type sizes at or above the floor ===== */
+:root {
+  --bg: #f2e6c8; --bg-dot: rgba(90, 52, 24, .10); --letterbox: #3a2516;
+  --win: #fff8e6; --win2: #f7ebcb; --line: #4a2c17; --hi: #ffffff; --lo: #e8d5a6; --scr: #fffdf3;
+  --ink: #2b1a10; --muted: #6b4f36; --accent: #a3271f; --good: #23805d; --shadow: rgba(74, 44, 23, .30);
+  --chip: #f1e1b5; --btn: #ffe08a; --btn-lo: #d9a93a;
+  --px: "Pixelify Sans", "Courier New", monospace;
+  /* small uppercase labels: Pixelify draws C almost like O at this size, Press Start 2P keeps them distinct (crisp at 24px, a multiple of 8) */
+  --label: "Press Start 2P", "Courier New", monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--letterbox); }
+body { color: var(--ink); font: 28px/1.4 var(--sans); }
+:focus-visible { outline: 4px dashed var(--accent); outline-offset: 4px; }
+
+#stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; overflow: hidden;
+  transform: translate(-50%, -50%) scale(var(--s, 1)); }
+.slide { position: absolute; inset: 0; display: none; background-color: var(--bg);
+  background-image: conic-gradient(at 4px 4px, transparent 75%, var(--bg-dot) 0); background-size: 28px 28px; }
+.slide.on { display: block; }
+.slide > header { position: absolute; left: 80px; right: 80px; top: 52px; }
+.kicker { margin: 0 0 12px; font: 400 24px/1.25 var(--label); color: var(--muted); letter-spacing: 0; text-transform: uppercase; }
+.kicker::before { content: "▸ "; color: var(--accent); }
+h1 { margin: 0 0 14px; font: 700 64px/1.05 var(--px); font-variant-ligatures: none; white-space: nowrap; }
+.sub { margin: 0; font-size: 30px; line-height: 1.35; max-width: 1700px; }
+.cover > header { top: 96px; }
+.cover h1 { font-size: 88px; }
+.cover .content { top: 380px; }
+
+/* content row: windows sit side by side, set each window's share with style="flex:2" */
+.content { position: absolute; left: 80px; right: 80px; top: 300px; bottom: 84px; display: flex; gap: 56px; }
+.col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 56px; }
+.win { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 20px;
+  background: var(--win); padding: 44px 24px 24px;
+  box-shadow: 0 -4px 0 0 var(--line), 0 4px 0 0 var(--line), -4px 0 0 0 var(--line), 4px 0 0 0 var(--line),
+    inset 0 4px 0 0 var(--hi), inset 4px 0 0 0 var(--hi), inset 0 -4px 0 0 var(--lo), inset -4px 0 0 0 var(--lo);
+  filter: drop-shadow(8px 8px 0 var(--shadow)); }
+.win > h2 { position: absolute; top: -22px; left: 24px; margin: 0; padding: 8px 16px 7px; background: var(--line); color: var(--win);
+  font: 400 24px/1.25 var(--label); letter-spacing: 0; text-transform: uppercase; white-space: nowrap; }
+.win p { margin: 0; }
+.screen { position: relative; flex: 1; min-height: 0; background: var(--scr); box-shadow: 0 0 0 4px var(--line); }
+.screen > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
+svg text { font-family: var(--sans); }
+svg text.px { font-family: var(--px); font-variant-ligatures: none; }
+.cap { font-size: 24px; line-height: 1.35; font-weight: 600; }
+.muted { color: var(--muted); }
+.note { font-size: 24px; line-height: 1.35; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 14px 12px; }
+.chip { display: inline-block; font: 600 24px/1.2 var(--sans); color: var(--line); background: var(--chip); padding: 5px 12px 4px;
+  box-shadow: 0 -3px 0 0 var(--line), 0 3px 0 0 var(--line), -3px 0 0 0 var(--line), 3px 0 0 0 var(--line); }
+.chip.good { background: #d3f0e1; color: #1b5e44; }
+.chip.bad { background: #f8d9d4; color: #8a1f17; }
+.readout { display: flex; flex-direction: column; }
+.readout .item { padding: 12px 0 18px; border-bottom: 4px dotted var(--lo); }
+.readout .item:last-child { border-bottom: 0; }
+.readout b { display: block; font: 400 24px/1.25 var(--label); color: var(--accent); letter-spacing: 0; text-transform: uppercase; margin-bottom: 8px; }
+.readout p { font-size: 28px; line-height: 1.35; }
+.steps { list-style: none; margin: 0; padding: 0; counter-reset: n; display: flex; flex-direction: column; gap: 24px; }
+.steps li { counter-increment: n; display: grid; grid-template-columns: 52px 1fr; gap: 20px; align-items: start; font-size: 28px; line-height: 1.35; }
+.steps li::before { content: counter(n); width: 48px; height: 48px; display: grid; place-items: center; margin-top: -4px;
+  font: 700 28px/1 var(--px); background: var(--btn);
+  box-shadow: 0 -3px 0 0 var(--line), 0 3px 0 0 var(--line), -3px 0 0 0 var(--line), 3px 0 0 0 var(--line), inset 0 -4px 0 0 var(--btn-lo); }
+.btn { appearance: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 10px;
+  font: 700 24px/1 var(--px); font-variant-ligatures: none; color: var(--ink); background: var(--btn); padding: 10px 14px 9px;
+  box-shadow: 0 -3px 0 0 var(--line), 0 3px 0 0 var(--line), -3px 0 0 0 var(--line), 3px 0 0 0 var(--line), inset 0 -4px 0 0 var(--btn-lo), 4px 6px 0 0 var(--shadow);
+  transition: transform .08s steps(2); }
+.btn.alt { background: var(--win); box-shadow: 0 -3px 0 0 var(--line), 0 3px 0 0 var(--line), -3px 0 0 0 var(--line), 3px 0 0 0 var(--line), inset 0 -4px 0 0 var(--lo), 4px 6px 0 0 var(--shadow); }
+.btn:hover { transform: translate(-2px, -2px); }
+.btn:active { transform: translate(2px, 2px); }
+.ui { position: absolute; right: 32px; bottom: 18px; display: flex; gap: 16px; align-items: center; z-index: 5; }
+.counter { font: 700 24px/1 var(--px); color: var(--win); background: var(--line); padding: 10px 14px 9px; }
+[data-at] { transition: opacity .3s steps(3); }
+.frozen *, .frozen *::before { transition: none !important; }
+.frozen .ui { display: none; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@page { size: 1920px 1080px; margin: 0; }
+@media print {
+  html, body { height: auto; overflow: visible; background: var(--bg); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #stage { position: static; transform: none; width: 1920px; height: auto; overflow: visible; }
+  .slide { display: block !important; position: relative; width: 1920px; height: 1080px; overflow: hidden; break-after: page; }
+  .slide:last-of-type { break-after: auto; }
+  .ui { display: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- ===== SLIDES: one <section class="slide"> per slide. data-scene names the scene function below. ===== -->
+
+<section class="slide cover" data-scene="cover">
+  <header>
+    <p class="kicker">Explainer · Web performance</p>
+    <h1>How a CDN serves a request</h1>
+    <p class="sub">A CDN keeps copies of your files on edge servers near users, so most requests never travel to the origin.</p>
+  </header>
+  <div class="content">
+    <div class="win"><h2>The cast</h2><div class="screen"><svg role="img" aria-label="A user, a nearby edge server and a far-away origin server; the request goes only to the edge"></svg></div></div>
+  </div>
+</section>
+
+<section class="slide" data-scene="dns">
+  <header>
+    <p class="kicker">Step 1 · Routing</p>
+    <h1>DNS sends each user to a nearby edge</h1>
+    <p class="sub">The URL stays the same. DNS or anycast routing answers with the address of an edge server close to the user.</p>
+  </header>
+  <div class="content">
+    <div class="win" style="flex:1.9"><h2>Lookup</h2>
+      <div class="screen"><svg role="img" aria-label="The user asks DNS for cdn.example.com and is sent to edge B, the nearest of three edges"></svg></div>
+      <p class="cap" data-at="3.8">Another user in another city gets a different edge for the same URL.</p>
+    </div>
+    <div class="win"><h2>Readout</h2>
+      <div class="readout">
+        <div class="item" data-at="0.6"><b>Same URL</b><p>The browser asks for cdn.example.com/logo.png as usual.</p></div>
+        <div class="item" data-at="1.8"><b>Nearest edge</b><p>DNS picks edge B because it is closest.</p></div>
+        <div class="item" data-at="3.4"><b>Why it matters</b><p>A short network path means a short round trip.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-scene="hit">
+  <header>
+    <p class="kicker">Step 2 · Cache hit</p>
+    <h1>Hit: the edge already has a fresh copy</h1>
+    <p class="sub">The edge looks the URL up in its cache, finds a copy younger than its max-age, and answers on its own.</p>
+  </header>
+  <div class="content">
+    <div class="win" style="flex:1.9"><h2>At the edge</h2>
+      <div class="screen"><svg role="img" aria-label="The edge finds /logo.png in its cache, aged 42 seconds of 300, and answers 200 OK"></svg></div>
+      <p class="cap" data-at="3.6">The Age header tells the browser how long the copy has sat in the cache.</p>
+    </div>
+    <div class="win"><h2>Readout</h2>
+      <div class="readout">
+        <div class="item" data-at="1.6"><b>Cache key</b><p>Usually the URL: host plus path.</p></div>
+        <div class="item" data-at="2.3"><b>Fresh</b><p>42 s is below max-age=300, so the copy is served as is.</p></div>
+        <div class="item" data-at="3.4"><b>Origin</b><p>Not contacted at all. This is the fast path.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-scene="miss">
+  <header>
+    <p class="kicker">Step 3 · Cache miss</p>
+    <h1>Miss: one trip to the origin, then store it</h1>
+    <p class="sub">No copy at the edge, so it fetches the file from the origin, keeps it for as long as Cache-Control allows, and answers.</p>
+  </header>
+  <div class="content">
+    <div class="win" style="flex:1.9"><h2>At the edge</h2>
+      <div class="screen"><svg role="img" aria-label="The edge has no copy, fetches it from the origin, stores it, answers, and the next user gets a hit"></svg></div>
+      <p class="cap" data-at="6.6">One miss warms the edge for every nearby user after it.</p>
+    </div>
+    <div class="win"><h2>Readout</h2>
+      <div class="readout">
+        <div class="item" data-at="1.2"><b>Miss</b><p>The first request here pays the long trip to the origin.</p></div>
+        <div class="item" data-at="4.4"><b>Store</b><p>Cache-Control: max-age=300 lets the edge keep the copy for 300 s.</p></div>
+        <div class="item" data-at="6.4"><b>Next user</b><p>A nearby user a moment later gets a hit.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-scene="revalidate">
+  <header>
+    <p class="kicker">Step 4 · Expiry</p>
+    <h1>After max-age: revalidate, don't re-download</h1>
+    <p class="sub">A stale copy is kept. The edge asks the origin if the file changed; 304 Not Modified means keep using it.</p>
+  </header>
+  <div class="content">
+    <div class="win" style="flex:1.9"><h2>Revalidation</h2>
+      <div class="screen"><svg role="img" aria-label="The cached copy passes 300 seconds and goes stale; the edge sends If-None-Match and the origin answers 304, so the copy is fresh again"></svg></div>
+      <p class="cap" data-at="5.4">ETag "v7" is the version tag the origin sent with the file.</p>
+    </div>
+    <div class="win"><h2>Readout</h2>
+      <div class="readout">
+        <div class="item" data-at="2.0"><b>Stale</b><p>Past max-age, the copy must be checked before it is served.</p></div>
+        <div class="item" data-at="3.0"><b>Conditional GET</b><p>The edge sends the copy's ETag in If-None-Match.</p></div>
+        <div class="item" data-at="4.8"><b>304</b><p>Headers only, no body: far cheaper than the full file.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-scene="bars">
+  <header>
+    <p class="kicker">Takeaway</p>
+    <h1>Most requests should end at the edge</h1>
+    <p class="sub">Each kind of request costs a different trip. Cache-Control decides which one you get.</p>
+  </header>
+  <div class="content">
+    <div class="win" style="flex:1.25"><h2>Remember</h2>
+      <ol class="steps">
+        <li data-at="0.3">A hit is served by the edge alone.</li>
+        <li data-at="0.8">A miss pays one origin trip, then the edge keeps the copy.</li>
+        <li data-at="1.3">max-age sets how long a copy counts as fresh.</li>
+        <li data-at="1.8">After that, a 304 revalidation sends headers, not the file.</li>
+        <li data-at="2.3">Static files: long max-age plus versioned names like app.3f9c.js.</li>
+      </ol>
+    </div>
+    <div class="win"><h2>Cost per request</h2><div class="screen"><svg role="img" aria-label="Bars: a cache hit is shortest, a 304 revalidation is in between, a cache miss is longest"></svg></div></div>
+  </div>
+</section>
+
+<!-- ===== end of slides ===== -->
+
+<nav class="ui" aria-label="Deck controls">
+  <button class="btn alt" id="pd-prev" type="button" aria-label="Previous slide">←</button>
+  <span class="counter" id="pd-count">1 / 1</span>
+  <button class="btn" id="pd-replay" type="button">↻ Replay</button>
+  <button class="btn alt" id="pd-next" type="button" aria-label="Next slide">→</button>
+</nav>
+</div>
+
+<script>
+/* ===== pixel-deck engine: helpers, sprites, timeline. Usually you do not edit this script. ===== */
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const C = { k:"#2a1e2c", line:"#4a2c17", ink:"#2b1a10", muted:"#6b4f36", accent:"#a3271f", scr:"#fffdf3", win:"#fff8e6", win2:"#f7ebcb",
+  cream:"#fff3d6", lo:"#e8d5a6", white:"#fffdf6", wood:"#b06a32", wood2:"#7a4520", gold:"#e0a526", gold2:"#9a6a10", yellow:"#ffd34d",
+  good:"#23805d", goodF:"#d3f0e1", jade:"#6fd3a6", jade2:"#2f9a6f", blue:"#2f67b3", blueF:"#dbe9f8", water:"#4b8fd0", sky:"#b5def0",
+  red:"#d0453a", redF:"#f8d9d4", warm:"#b45f06", warmF:"#fde2b3", gray:"#9aa0a8", gray2:"#6b7079", metal:"#b9c3cf", metal2:"#7c8794",
+  night:"#2b3470", purple:"#8a64d6", purple2:"#5b3fa3", skin:"#f8d3ae", blush:"#f2958f", teal:"#2f8f86",
+  leaf:"#5d8a4e", leaf2:"#79a65f", leaf3:"#466f3d", trunk:"#5a3a22", sand:"#e9d3a0", grass:"#8fb35e", shadow:"rgba(74,44,23,.28)" };
+
+/* ---------- SVG helpers ---------- */
+function E(tag, a, p){ const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
+const R = (p, x, y, w, h, fill) => E("rect", {x, y, width:w, height:h, fill}, p);
+// text: o = {size (>=22), fill, w (weight), anchor, px (pixel font)}
+function T(p, x, y, text, o = {}){
+  let size = o.size || 24;
+  if (size < 22){ console.warn(`pixel-deck: label "${text}" at ${size}px raised to the 22px floor`); size = 22; }
+  const t = E("text", {x, y, "font-size":size, fill:o.fill || C.ink, "font-weight":o.w || 600}, p);
+  if (o.anchor) t.setAttribute("text-anchor", o.anchor);
+  if (o.px) t.setAttribute("class", "px");
+  t.textContent = text; return t;
+}
+const notch = (x, y, w, h, b) => `M${x+b} ${y}h${w-2*b}v${b}h${b}v${h-2*b}h${-b}v${b}h${-(w-2*b)}v${-b}h${-b}v${-(h-2*b)}h${b}z`;
+// pixel box with notched corners and optional offset shadow; returns {g, e (edge), f (fill)}
+function pbox(p, x, y, w, h, fill = C.win, line = C.line, shadow = true, b = 4){
+  const g = E("g", {}, p);
+  if (shadow) E("path", {d:notch(x+6, y+6, w, h, b), fill:C.shadow}, g);
+  const e = E("path", {d:notch(x, y, w, h, b), fill:line}, g), f = R(g, x+b, y+b, w-2*b, h-2*b, fill);
+  return {g, e, f};
+}
+const setBox = (b, fill, line) => { b.f.setAttribute("fill", fill); if (line) b.e.setAttribute("fill", line); };
+// tag: a pixel box sized to its text. o = T options + {bg, line, pad, shadow}. x is the left edge, or the center with anchor:"middle"
+function tag(p, x, y, text, o = {}){
+  const g = E("g", {}, p), pad = o.pad ?? 14, size = Math.max(22, o.size || 24);
+  const t = T(g, 0, 0, text, {...o, size, anchor:null});
+  const tw = Math.ceil(t.getComputedTextLength ? t.getComputedTextLength() : text.length * size * .55) || text.length * size * .55;
+  const w = tw + 2 * pad, h = Math.round(size * 1.7), x0 = o.anchor === "middle" ? Math.round(x - w / 2) : x;
+  const box = pbox(g, x0, y, w, h, o.bg || C.white, o.line || C.line, o.shadow ?? false);
+  g.appendChild(t); t.setAttribute("x", x0 + pad); t.setAttribute("y", Math.round(y + h / 2 + size * .36));
+  return Object.assign(g, {w, h, box});
+}
+// sprites: rows of characters, one char per pixel, "." is transparent, pal maps char -> color
+function layer(rows, pal){
+  const acc = {};
+  rows.forEach((row, y) => { for (let x = 0; x < row.length;){ const c = row[x]; let e = x + 1; while (e < row.length && row[e] === c) e++;
+    const k = pal[c]; if (k) (acc[k] = acc[k] || []).push(`M${x} ${y}h${e-x}v1h${x-e}z`); x = e; } });
+  return Object.entries(acc).map(([k, d]) => `<path fill="${k}" d="${d.join("")}"/>`).join("");
+}
+function sprite(p, rows, pal, s = 4, x = 0, y = 0){
+  if (typeof rows === "string"){ pal = pal || PAL[rows]; rows = SP[rows]; }
+  const g = E("g", {}, p); g.innerHTML = `<g transform="scale(${s})">${layer(rows, pal)}</g>`; at(g, x, y);
+  g.w = Math.max(...rows.map(r => r.length)) * s; g.h = rows.length * s; return g;
+}
+// dotted pixel path through points [[x,y],...]; .reveal(k) shows the first k (0..1) of it
+function dots(p, pts, color = C.line, step = 14, sz = 6){
+  const g = E("g", {}, p), all = [];
+  for (let i = 1; i < pts.length; i++){ const [x1, y1] = pts[i-1], [x2, y2] = pts[i], n = Math.max(1, Math.round(Math.hypot(x2-x1, y2-y1) / step));
+    for (let j = i === 1 ? 0 : 1; j <= n; j++) all.push(R(g, Math.round(lerp(x1, x2, j/n) - sz/2), Math.round(lerp(y1, y2, j/n) - sz/2), sz, sz, color)); }
+  g.reveal = k => all.forEach((d, i) => vis(d, i < Math.round(k * all.length)));
+  return g;
+}
+// point at fraction k (0..1) of the way along a polyline
+function along(pts, k){
+  const L = []; let tot = 0; for (let i = 1; i < pts.length; i++){ const l = Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]); L.push(l); tot += l; }
+  let d = clamp(k) * tot; for (let i = 0; i < L.length; i++){ if (d <= L[i] || i === L.length - 1){ const f = L[i] ? d / L[i] : 0; return [lerp(pts[i][0], pts[i+1][0], f), lerp(pts[i][1], pts[i+1][1], f)]; } d -= L[i]; }
+  return pts[0];
+}
+// pixel arrow from (x1,y1) to (x2,y2); horizontal or vertical (whichever axis is longer)
+function arrow(p, x1, y1, x2, y2, color = C.line, th = 6){
+  const horiz = Math.abs(x2 - x1) >= Math.abs(y2 - y1), len = Math.round(horiz ? Math.abs(x2 - x1) : Math.abs(y2 - y1));
+  const deg = horiz ? (x2 >= x1 ? 0 : 180) : (y2 >= y1 ? 90 : 270);
+  const g = E("g", {transform:`translate(${Math.round(x1)},${Math.round(y1)}) rotate(${deg})`}, p), hw = th * 3;
+  R(g, 0, -th/2, Math.max(0, len - hw), th, color);
+  for (let c = 0; c < 6; c++){ const h = Math.max(2, Math.round(hw * 2 * (1 - c / 6))); R(g, len - hw + c * hw / 6, -h/2, hw / 6 + .5, h, color); }
+  return g;
+}
+let pdUid = 0;
+// backdrop: screen color + dot grid; o.sky / o.ground = band heights in px (dithered edges)
+function backdrop(svg, w, h, o = {}){
+  const id = "pd" + (pdUid++), defs = E("defs", {}, svg);
+  E("pattern", {id:id + "d", width:28, height:28, patternUnits:"userSpaceOnUse"}, defs).appendChild(E("rect", {x:0, y:0, width:4, height:4, fill:"rgba(90,52,24,.08)"}));
+  const dither = (k, f) => { const pt = E("pattern", {id:id + k, width:4, height:4, patternUnits:"userSpaceOnUse"}, defs); R(pt, 0, 0, 2, 2, f); R(pt, 2, 2, 2, 2, f); return `url(#${id + k})`; };
+  R(svg, 0, 0, w, h, o.base || C.scr);
+  if (o.sky){ R(svg, 0, 0, w, o.sky, o.skyColor || "#d4ecf3"); R(svg, 0, o.sky, w, 8, dither("s", o.skyColor || "#d4ecf3")); }
+  R(svg, 0, 0, w, h, `url(#${id}d)`);
+  if (o.ground){ const gy = h - o.ground; R(svg, 0, gy, w, o.ground, o.groundColor || C.sand); R(svg, 0, gy - 8, w, 8, dither("g", o.groundColor || C.sand)); R(svg, 0, gy, w, 4, o.grassColor || C.grass); }
+  return svg;
+}
+/* ---------- timing helpers: t is seconds since the slide started ---------- */
+const clamp = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const ease = v => v < .5 ? 2*v*v : 1 - Math.pow(-2*v + 2, 2) / 2;
+const seg = (t, a, b) => ease(clamp((t - a) / (b - a)));   // 0 before a, 1 after b, eased between
+const lerp = (a, b, k) => a + (b - a) * k;
+const at = (e, x, y) => e.setAttribute("transform", `translate(${Math.round(x)},${Math.round(y)})`);
+const op = (e, v) => e.setAttribute("opacity", clamp(v).toFixed(3));
+const hop = (e, v) => { e.style.opacity = clamp(v).toFixed(3); };   // opacity for HTML elements
+const vis = (e, on) => e.setAttribute("display", on ? "inline" : "none");
+const blink = (t, hz = 2) => Math.floor(t * hz * 2) % 2 === 0;
+
+/* ---------- sprite library (original 16-bit art) ---------- */
+const SP = {
+  user:["...KKKK...","..KHHHHK..",".KHHHHHHK.","KKKKKKKKKK",".KSSSSSSK.",".KSKSSKSK.",".KSBSSBSK.","..KKKKKK..",".KCCCCCCK.","KSKCCCCKSK",".KCCCCCCK.","..KKKKKK..","..KK..KK..","..KK..KK.."],
+  laptop:["..KKKKKKKKKKKK..","..KNNNNNNNNNNK..","..KNSSSSSSSSNK..","..KNSWWSSSSSNK..","..KNSSSSSSSSNK..","..KNSJJJJSSSNK..","..KNSSSSSSSSNK..","..KNNNNNNNNNNK..",".KKKKKKKKKKKKKK.","KMMMMMMMMMMMMMMK","KKKKKKKKKKKKKKKK"],
+  phone:["KKKKKKKK","KNNNNNNK","KSSSSSSK","KSJJSSSK","KSSSSSSK","KSJJJJSK","KSSSSSSK","KSJJSSSK","KSSSSSSK","KSSSSSSK","KNNNNNNK","KNNWWNNK","KKKKKKKK"],
+  server:["KKKKKKKKKK","KMMMMMMMMK","KMGMYMMNNK","KMMMMMMMMK","KKKKKKKKKK","KMMMMMMMMK","KMGMGMMNNK","KMMMMMMMMK","KKKKKKKKKK","KMMMMMMMMK","KMGMMMMNNK","KMMMMMMMMK","KKKKKKKKKK"],
+  database:["..KKKKKKKK..",".KWWWWWWWWK.","KMWWWWWWWWMK","KMMKKKKKKMMK","KMMMMMMMMMMK","KMGMMMMMMMMK","KNMMMMMMMMNK","KKNNNNNNNNKK","KMMMMMMMMMMK","KMGMMMMMMMMK","KNMMMMMMMMNK","KKNNNNNNNNKK",".KMMMMMMMMK.","..KKKKKKKK.."],
+  cloud:["......KKKK......","....KKWWWWKK....","...KWWWWWWWWK...",".KKWWWWWWWWWWKK.","KWWWWWWWWWWWWWWK","KWWWWWWWWWWWWWWK","KSWWWWWWWWWWWWSK",".KSSSSSSSSSSSSK.","..KKKKKKKKKKKK.."],
+  gear:["....KKK....",".KK.KMK.KK.",".KMKKMKKMK.","..KMMMMMK..","KKKMKKKMKKK","KMMMK.KMMMK","KKKMKKKMKKK","..KMMMMMK..",".KMKKMKKMK.",".KK.KMK.KK.","....KKK...."],
+  scroll:[".KKKKKKKKKK.","KWWWWWWWWWWK",".KKKKKKKKKK.","..KPPPPPPK..","..KPLLLLPK..","..KPPPPPPK..","..KPLLLPPK..","..KPPPPRRK..","..KPLLPRRK..",".KKKKKKKKKK.","KWWWWWWWWWWK",".KKKKKKKKKK."],
+  page:["KKKKKK...","KWWWWKK..","KWWWWKWK.","KWWWWKKKK","KWLLLLLWK","KWWWWWWWK","KWLLLLWWK","KWWWWWWWK","KWLLLLLWK","KWWWWWWWK","KKKKKKKKK"],
+  lock:["...KKKK...","..KMMMMK..",".KMK..KMK.",".KMK..KMK.",".KMK..KMK.","KKKKKKKKKK","KYYYYYYYYK","KYYYKKYYYK","KYYYKKYYYK","KYYYYYYYYK","KDDDDDDDDK","KKKKKKKKKK"],
+  key:[".KKKK.........","KYYYYK........","KYKKYKKKKKKKKK","KYKKYYYYYYYYYK","KYYYYKKKKYKKYK",".KKKK....K..K."],
+  chest:[".KKKKKKKKKK.","KBBBBBBBBBBK","KBbbbbbbbbBK","KKKKKGGKKKKK","KBBBKGGKBBBK","KBBBBKKBBBBK","KBBBBBBBBBBK","KbbbbbbbbbbK","KKKKKKKKKKKK"],
+  clock:["..KKKKK..",".KWWWWWK.","KWWWKWWWK","KWWWKWWWK","KWWWKKKWK","KWWWWWWWK","KWWWWWWWK",".KWWWWWK.","..KKKKK.."],
+  check:[".KKKKKKK.","KGGGGGGGK","KGGGGGGWK","KGGGGGWGK","KWGGGWGGK","KGWGWGGGK","KGGWGGGGK","KGGGGGGGK",".KKKKKKK."],
+  cross:[".KKKKKKK.","KRRRRRRRK","KRWRRRWRK","KRRWRWRRK","KRRRWRRRK","KRRWRWRRK","KRWRRRWRK","KRRRRRRRK",".KKKKKKK."],
+  mail:["KKKKKKKKK","KKWWWWWKK","KWKWWWKWK","KWWKWKWWK","KWWWKWWWK","KWWWWWWWK","KKKKKKKKK"],
+  globe:["...KKKKK...",".KKBGGBBKK.",".KBGGGBBBK.","KBBGGBBBGBK","KBBBGBBBGGK","KBBBBBBGGGK","KBGBBBBBGBK","KBGGBBBBBBK",".KBGGBBBBK.",".KKBBBBBKK.","...KKKKK..."],
+  bolt:["....KKKK","...KYYK.","..KYYK..",".KYYKKKK","KYYYYYYK","KKKKYYK.","...KYYK.","..KYK...","..KK...."],
+  hourglass:["KKKKKKKKK",".KWWWWWK.",".KYYYYYK.","..KYYYK..","...KYK...","...KWK...","..KWYWK..",".KWWYWWK.",".KYYYYYK.","KKKKKKKKK"],
+  warn:[".....K.....","....KYK....","....KYK....","...KYKYK...","...KYKYK...","..KYYKYYK..","..KYYYYYK..",".KYYYKYYYK.","KYYYYYYYYYK","KKKKKKKKKKK"],
+  flag:["KK....","KRRRR.","KRRRRR","KRRRR.","K.....","K.....","K.....","K....."],
+  tree:["..gggg..",".gglggg.","gglllggg","gggggggg","gdgggdgg",".gdddgg.","...tt...","...tt..."],
+  puff:["......wwww........","....wwwwwwww.www..","..wwwwwwwwwwwwwww.",".wwwwwwwwwwwwwwwww","ssssssssssssssssss"],
+};
+const PAL = {
+  user:{K:C.k, H:C.purple2, S:C.skin, B:C.blush, C:C.teal},
+  laptop:{K:C.k, N:C.night, S:C.sky, W:C.white, J:C.jade2, M:C.metal},
+  phone:{K:C.k, N:C.night, S:C.sky, J:C.jade2, W:C.white},
+  server:{K:C.k, M:C.metal, N:C.metal2, G:C.jade, Y:C.yellow},
+  database:{K:C.k, W:C.white, M:C.metal, N:C.metal2, G:C.jade},
+  cloud:{K:C.k, W:C.white, S:C.sky},
+  gear:{K:C.k, M:C.metal},
+  scroll:{K:C.k, W:C.wood, P:C.cream, L:C.gray, R:C.red},
+  page:{K:C.k, W:C.white, L:C.gray},
+  lock:{K:C.k, M:C.metal, Y:C.gold, D:C.gold2},
+  key:{K:C.k, Y:C.gold},
+  chest:{K:C.k, B:C.wood, b:C.wood2, G:C.gold},
+  clock:{K:C.k, W:C.white},
+  check:{K:C.k, G:C.jade2, W:C.white},
+  cross:{K:C.k, R:C.red, W:C.white},
+  mail:{K:C.k, W:C.white},
+  globe:{K:C.k, B:C.water, G:C.jade2},
+  bolt:{K:C.k, Y:C.yellow},
+  hourglass:{K:C.k, W:C.white, Y:C.gold},
+  warn:{K:C.k, Y:C.yellow},
+  flag:{K:C.k, R:C.red},
+  tree:{g:C.leaf, l:C.leaf2, d:C.leaf3, t:C.trunk},
+  puff:{w:"#ffffff", s:"#d9eef6"},
+};
+// variants: pass a different palette, e.g. sprite(g, "server", {...PAL.server, G:C.red}, 6, x, y) for a server with red lights
+
+/* ---------- timeline engine ---------- */
+const SCENES = {};
+// scene(name, duration in seconds, (svg, w, h) => update(t)); the svg viewBox is set to w x h stage pixels, so sizes are 1:1
+function scene(name, dur, fn){ SCENES[name] = {dur, fn}; }
+const stage = document.getElementById("stage"), root = document.documentElement;
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let slides = [], cur = 0, raf = 0, frozen = false;
+
+function fitTitle(sl){ const h = sl.querySelector("h1"); if (!h) return; h.style.fontSize = "";
+  let s = parseFloat(getComputedStyle(h).fontSize); while (h.scrollWidth > h.clientWidth + 1 && s > 48){ s -= 2; h.style.fontSize = s + "px"; } }
+function build(){
+  slides = [...stage.querySelectorAll(":scope > section.slide")].map((sl, i) => {
+    sl.classList.add("on"); fitTitle(sl);
+    if (!sl.hasAttribute("aria-label")) sl.setAttribute("aria-label", `Slide ${i+1}: ${(sl.querySelector("h1") || {}).textContent || ""}`);
+    const ats = [...sl.querySelectorAll("[data-at]")];
+    let dur = Math.max(0, ...ats.map(e => +e.dataset.at + .4)), upd = null;
+    const sc = SCENES[sl.dataset.scene];
+    if (sl.dataset.scene && !sc) console.warn(`pixel-deck: no scene registered for "${sl.dataset.scene}"`);
+    const svg = sl.querySelector(".screen > svg");
+    if (sc && svg){ const w = Math.round(svg.parentNode.clientWidth), h = Math.round(svg.parentNode.clientHeight);
+      svg.setAttribute("viewBox", `0 0 ${w} ${h}`); upd = sc.fn(svg, w, h) || null; dur = Math.max(dur, sc.dur); }
+    sl.classList.remove("on");
+    const render = t => { if (upd) upd(t); ats.forEach(e => { e.style.opacity = t >= +e.dataset.at ? 1 : 0; }); };
+    return {sl, render, dur};
+  });
+}
+function show(i, t0){
+  cur = Math.max(0, Math.min(slides.length - 1, i));
+  slides.forEach((b, k) => b.sl.classList.toggle("on", k === cur));
+  document.getElementById("pd-count").textContent = `${cur + 1} / ${slides.length}`;
+  cancelAnimationFrame(raf);
+  const b = slides[cur];
+  if (!frozen) history.replaceState(null, "", `#s=${cur + 1}`);
+  if (frozen || reduce){ b.render(t0 == null ? b.dur : Math.min(t0, b.dur)); return; }
+  const start = performance.now(); b.render(0);
+  const tick = now => { const t = (now - start) / 1000; b.render(Math.min(t, b.dur)); if (t < b.dur) raf = requestAnimationFrame(tick); };
+  raf = requestAnimationFrame(tick);
+}
+const fit = () => stage.style.setProperty("--s", Math.min(innerWidth / 1920, innerHeight / 1080));
+function live(){ if (frozen){ frozen = false; root.classList.remove("frozen"); } }
+function go(i){ live(); show(i); }
+addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (k === "ArrowRight" || k === "PageDown" || k === " "){ e.preventDefault(); go(cur + 1); }
+  else if (k === "ArrowLeft" || k === "PageUp"){ e.preventDefault(); go(cur - 1); }
+  else if (k === "Home"){ e.preventDefault(); go(0); }
+  else if (k === "End"){ e.preventDefault(); go(slides.length - 1); }
+  else if (k === "r" || k === "R") go(cur);
+});
+document.getElementById("pd-next").onclick = () => go(cur + 1);
+document.getElementById("pd-prev").onclick = () => go(cur - 1);
+document.getElementById("pd-replay").onclick = () => go(cur);
+addEventListener("resize", fit);
+addEventListener("beforeprint", () => slides.forEach(b => b.render(b.dur)));
+addEventListener("afterprint", () => show(cur, frozen ? undefined : null));
+
+/* #check: lays out every slide at its final state and reports text below the type floor, clipped, or overlapping */
+const CAPTION = "h2, .kicker, .chip, .cap, .note, .readout b, .counter";
+function alpha(el, top){ let a = 1; for (let e = el; e && e !== top.parentNode; e = e.parentElement){ const cs = getComputedStyle(e); if (cs.visibility === "hidden") return 0; a *= +cs.opacity; } return a; }
+function runCheck(){
+  frozen = true; root.classList.add("frozen");
+  const issues = [], S = stage.getBoundingClientRect().width / 1920;
+  slides.forEach((b, i) => {
+    slides.forEach(x => x.sl.classList.toggle("on", x === b)); b.render(b.dur);
+    const n = i + 1, h1 = b.sl.querySelector("h1");
+    if (!h1 || !h1.textContent.trim()) issues.push({slide:n, kind:"no-title", text:""});
+    const sr = b.sl.getBoundingClientRect(), box = r => ({l:(r.left - sr.left) / S, t:(r.top - sr.top) / S, r:(r.right - sr.left) / S, b:(r.bottom - sr.top) / S});
+    const items = [], tw = document.createTreeWalker(b.sl, NodeFilter.SHOW_TEXT);
+    for (let nd; (nd = tw.nextNode());){
+      if (!nd.data.trim()) continue;
+      const el = nd.parentElement; if (el.closest(".ui") || alpha(el, b.sl) < .05) continue;
+      let r, px, floor; const txt = el.closest("text");
+      if (txt){ r = txt.getBoundingClientRect(); const svg = txt.ownerSVGElement, vb = svg.viewBox.baseVal, sb = svg.getBoundingClientRect();
+        const k = vb && vb.width ? Math.min(sb.width / vb.width, sb.height / vb.height) / S : 1;
+        px = parseFloat(getComputedStyle(txt).fontSize) * k; floor = 22; }
+      else { const rg = document.createRange(); rg.selectNodeContents(nd); r = rg.getBoundingClientRect(); px = parseFloat(getComputedStyle(el).fontSize); floor = el.closest(CAPTION) ? 24 : 28; }
+      if (!r.width || !r.height) continue;
+      const bx = box(r), label = (txt || el).textContent.trim().slice(0, 48), owner = txt || el;
+      if (px < floor - .5) issues.push({slide:n, kind:"small", text:label, detail:`${px.toFixed(1)}px < ${floor}px`});
+      const cont = owner.closest(".screen") || (owner.closest(".win > h2") ? b.sl : owner.closest(".win")) || b.sl, cb = box(cont.getBoundingClientRect());
+      if (bx.l < cb.l - 1 || bx.t < cb.t - 1 || bx.r > cb.r + 1 || bx.b > cb.b + 1) issues.push({slide:n, kind:"clipped", text:label, detail:`outside its ${cont.className.split(" ")[0]}`});
+      items.push({owner, bx, label});
+    }
+    for (let a = 0; a < items.length; a++) for (let c = a + 1; c < items.length; c++){
+      const A = items[a], B = items[c]; if (A.owner === B.owner || A.owner.contains(B.owner) || B.owner.contains(A.owner)) continue;
+      const ow = Math.min(A.bx.r, B.bx.r) - Math.max(A.bx.l, B.bx.l), oh = Math.min(A.bx.b, B.bx.b) - Math.max(A.bx.t, B.bx.t);
+      if (ow > 2 && oh > 2) issues.push({slide:n, kind:"overlap", text:A.label, detail:`overlaps "${B.label}"`});
+    }
+  });
+  const pre = document.createElement("pre"); pre.id = "pd-report"; pre.hidden = true;
+  pre.textContent = JSON.stringify({slides:slides.length, issues}); document.body.appendChild(pre);
+  console.log(issues.length ? issues : "pixel-deck check: no issues");
+  show(0, Infinity);
+}
+// #s=N plays slide N; #s=N&t=T freezes it at T seconds (T may be "end"); #check runs the layout check
+function boot(){
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.has("check")) return runCheck();
+  frozen = h.has("t"); root.classList.toggle("frozen", frozen);
+  const t = h.get("t") === "end" ? Infinity : +h.get("t");
+  show(h.has("s") ? (+h.get("s") || 1) - 1 : 0, frozen ? t : null);
+}
+addEventListener("DOMContentLoaded", () => {
+  fit();
+  const fonts = document.fonts ? Promise.all(['700 64px "Pixelify Sans"', '400 24px "Press Start 2P"', '400 28px "IBM Plex Sans"', '600 28px "IBM Plex Sans"'].map(f => document.fonts.load(f).catch(() => {}))) : Promise.resolve();
+  Promise.race([fonts, new Promise(r => setTimeout(r, 2500))]).then(() => {
+    build(); slides.forEach(b => b.render(b.dur));   // every slide starts in its final state, so print-to-PDF is complete
+    addEventListener("hashchange", boot); boot();
+  });
+});
+</script>
+
+<script>
+/* ===== SCENES: one scene() per data-scene name. Draw once, return update(t). Every word is T() or tag(), never a sprite. ===== */
+
+// demo helpers: centre a sprite on (cx, cy); a green tag; a packet moving along a path (k = 0..1, hidden outside 0..1)
+const centre = (g, cx, cy) => { at(g, cx - g.w / 2, cy - g.h / 2); return g; };
+const good = {bg:C.goodF, line:C.good, fill:C.good}, bad = {bg:C.redF, line:C.red, fill:C.red};
+function travel(g, pts, k){ vis(g, k > 0 && k < 1); const [x, y] = along(pts, k); centre(g, x, y); }
+const back = pts => [...pts].reverse();
+
+scene("cover", 4.4, (svg, w, h) => {
+  backdrop(svg, w, h, {sky:150, ground:110});
+  sprite(svg, "puff", null, 5, 150, 34); sprite(svg, "puff", null, 4, Math.round(w * .52), 66); sprite(svg, "puff", null, 5, w - 360, 30);
+  const gy = h - 110, ux = 170, ex = Math.round(w * .34), ox = w - 200;
+  [.52, .6, .68].forEach((f, i) => sprite(svg, "tree", null, 7 - i % 2, Math.round(w * f), gy - 56 + (i % 2) * 7));
+  centre(sprite(svg, "user", null, 7, 0, 0), ux - 30, gy - 49);
+  centre(sprite(svg, "laptop", null, 4, 0, 0), ux + 42, gy - 22);
+  centre(sprite(svg, "server", null, 8, 0, 0), ex, gy - 52);
+  centre(sprite(svg, "server", null, 11, 0, 0), ox, gy - 72);
+  T(svg, ux, gy + 52, "you", {anchor:"middle", size:26});
+  T(svg, ex, gy + 52, "edge server · nearby", {anchor:"middle", size:26});
+  T(svg, ox, gy + 52, "origin · far away", {anchor:"middle", size:26});
+  const p1 = [[ux + 80, gy - 60], [ex - 64, gy - 60]], p2 = [[ex + 64, gy - 60], [ox - 90, gy - 60]];
+  const d1 = dots(svg, p1, C.good), d2 = dots(svg, p2, C.muted);
+  const l1 = tag(svg, Math.round((ux + 80 + ex - 64) / 2), gy - 168, "short trip", {anchor:"middle", ...good});
+  const l2 = tag(svg, Math.round((ex + ox) / 2), gy - 168, "long trip, only on a miss", {anchor:"middle"});
+  const pkt = sprite(svg, "mail", null, 5), ok = centre(sprite(svg, "check", null, 6), ex, gy - 140);
+  return t => {
+    d1.reveal(seg(t, .3, 1)); op(l1, seg(t, .8, 1.1));
+    travel(pkt, t < 2.2 ? p1 : back(p1), t < 2.2 ? seg(t, 1.1, 2.0) : seg(t, 2.4, 3.2));
+    op(ok, seg(t, 2.0, 2.3));
+    d2.reveal(seg(t, 3.2, 3.9)); op(l2, seg(t, 3.7, 4.1));
+  };
+});
+
+scene("dns", 4.4, (svg, w, h) => {
+  backdrop(svg, w, h);
+  const ux = 100, uy = Math.round(h * .56), dx = Math.round(w * .5), dy = 96, ex = Math.round(w * .78);
+  const ys = [.2, .55, .85].map(f => Math.round(h * f));
+  centre(sprite(svg, "user", null, 7), ux, uy); T(svg, ux, uy + 86, "you", {anchor:"middle"});
+  pbox(svg, dx - 120, dy - 60, 240, 120, C.win2);
+  centre(sprite(svg, "globe", null, 6), dx - 54, dy); T(svg, dx + 14, dy + 14, "DNS", {px:true, size:40, w:700});
+  const glow = pbox(svg, ex - 46, ys[1] - 54, 92, 108, C.goodF, C.good, false);
+  const edges = ys.map((y, i) => { const g = E("g", {}, svg); centre(sprite(g, "server", null, 6), ex, y);
+    T(g, ex + 58, y + 9, ["edge A · far", "edge B · near", "edge C · far"][i], {}); return g; });
+  const q = [[ux, uy - 64], [ux, dy], [dx - 130, dy]], dq = dots(svg, q, C.muted);
+  const qTag = tag(svg, ux + 24, dy + 34, "cdn.example.com ?", {});
+  const aTag = tag(svg, dx, dy + 82, "nearest: edge B", {anchor:"middle", ...good});
+  const route = [[ux + 52, uy], [ex - 50, ys[1]]], dr = dots(svg, route, C.good);
+  const pkt = sprite(svg, "mail", null, 5);
+  return t => {
+    dq.reveal(seg(t, .3, 1.0)); op(qTag, seg(t, .6, .9)); op(aTag, seg(t, 1.3, 1.6));
+    dr.reveal(seg(t, 1.8, 2.5));
+    edges.forEach((g, i) => op(g, i === 1 ? 1 : 1 - .6 * seg(t, 2.0, 2.4)));
+    travel(pkt, route, seg(t, 2.6, 3.5)); op(glow.g, seg(t, 3.4, 3.7));
+  };
+});
+
+scene("hit", 4.4, (svg, w, h) => {
+  backdrop(svg, w, h);
+  const ly = Math.round(h * .42), ux = 90, ex = 320, px = 460, pw = w - px - 24, py = 36, ph = 330;
+  centre(sprite(svg, "user", null, 7), ux, ly); T(svg, ux, ly + 86, "you", {anchor:"middle"});
+  centre(sprite(svg, "server", null, 8), ex, ly); T(svg, ex, ly + 90, "edge", {anchor:"middle"});
+  pbox(svg, px, py, pw, ph, C.win2); T(svg, px + 24, py + 46, "edge cache", {px:true, size:30, w:700});
+  const rows = [["/logo.png", "age 42 s"], ["/app.js", "age 9 s"], ["/style.css", "age 120 s"]].map(([k, a], i) => {
+    const ry = py + 74 + i * 80, b = pbox(svg, px + 20, ry, pw - 40, 64, C.white, C.line, false);
+    sprite(svg, "scroll", null, 4, px + 32, ry + 8);
+    T(svg, px + 94, ry + 42, k, {size:26}); T(svg, px + pw - 40, ry + 42, a, {anchor:"end", fill:C.muted, w:400});
+    return b;
+  });
+  const p = [[ux + 50, ly], [ex - 56, ly]], d = dots(svg, p, C.good);
+  const look = arrow(svg, ex + 54, ly, px - 6, ly, C.muted);
+  const fresh = tag(svg, px + pw / 2, py + ph + 22, "42 s < max-age 300 s: fresh", {anchor:"middle", ...good});
+  const resp = tag(svg, (ux + ex) / 2, ly - 150, "200 OK · Age: 42", {anchor:"middle"});
+  const pkt = sprite(svg, "mail", null, 5), doc = sprite(svg, "scroll", null, 4);
+  const ok = centre(sprite(svg, "check", null, 5), ux + 52, ly - 70);
+  T(svg, 24, h - 30, "time to answer", {fill:C.muted, w:400});
+  const bar = R(svg, 220, h - 54, 0, 28, C.jade2), barT = T(svg, 420, h - 30, "edge only", {fill:C.good});
+  return t => {
+    d.reveal(seg(t, .2, .6)); travel(pkt, p, seg(t, .4, 1.2));
+    op(look, seg(t, 1.2, 1.5));
+    setBox(rows[0], t >= 1.7 ? C.yellow : C.white, t >= 1.7 ? C.gold2 : C.line);
+    op(fresh, seg(t, 2.1, 2.4)); op(resp, seg(t, 2.5, 2.8));
+    travel(doc, back(p), seg(t, 2.6, 3.4)); op(ok, seg(t, 3.4, 3.7));
+    bar.setAttribute("width", Math.round(180 * seg(t, 2.6, 3.4))); op(barT, seg(t, 3.3, 3.6));
+  };
+});
+
+scene("miss", 7, (svg, w, h) => {
+  backdrop(svg, w, h);
+  const ly = Math.round(h * .34), ux = 80, ex = 320, ox = w - 110, y2 = h - 100;
+  centre(sprite(svg, "user", null, 7), ux, ly); T(svg, ux, ly + 86, "you", {anchor:"middle"});
+  centre(sprite(svg, "server", null, 8), ex, ly); T(svg, ex, ly + 90, "edge", {anchor:"middle"});
+  centre(sprite(svg, "server", null, 10), ox, ly); T(svg, ox, ly + 98, "origin", {anchor:"middle"});
+  centre(sprite(svg, "chest", null, 5), ex, ly + 150);
+  const cEmpty = T(svg, ex, ly + 214, "cache: empty", {anchor:"middle", fill:C.muted, w:400});
+  const cFull = T(svg, ex, ly + 214, "cache: /logo.png", {anchor:"middle", fill:C.good});
+  const cross = centre(sprite(svg, "cross", null, 4), ex + 52, ly + 126), stored = centre(sprite(svg, "scroll", null, 4), ex + 62, ly + 140);
+  const missTag = tag(svg, ex, ly - 150, "not in cache", {anchor:"middle", ...bad});
+  const p1 = [[ux + 50, ly - 20], [ex - 56, ly - 20]], p2 = [[ex + 56, ly - 60], [ox - 66, ly - 60]];
+  const d1 = dots(svg, p1, C.good), d2 = dots(svg, p2, C.muted);
+  const req = tag(svg, (ex + ox) / 2 + 40, ly - 140, "GET /logo.png", {anchor:"middle"});
+  const res = tag(svg, (ex + ox) / 2 + 60, ly - 40, "200 OK · max-age=300", {anchor:"middle"});
+  const pkt = sprite(svg, "mail", null, 5), pkt2 = sprite(svg, "mail", null, 5), doc = sprite(svg, "scroll", null, 4), doc2 = sprite(svg, "scroll", null, 4);
+  const ok = centre(sprite(svg, "check", null, 5), ux + 52, ly - 70);
+  const u2 = E("g", {}, svg); centre(sprite(u2, "user", null, 7), ux, y2); T(u2, ux, y2 + 84, "next nearby user", {anchor:"start", w:400, fill:C.muted}).setAttribute("x", 24);
+  const p3 = [[ux + 52, y2 - 10], [ex - 50, ly + 150]], d3 = dots(svg, p3, C.good);
+  const hit = tag(svg, ex + 20, y2 - 20, "cache hit", {...good});
+  return t => {
+    d1.reveal(seg(t, .2, .6)); travel(pkt, p1, seg(t, .3, 1.0));
+    vis(cross, t >= 1.1 && t < 4.4);
+    d2.reveal(seg(t, 1.5, 2.1)); op(req, seg(t, 1.6, 1.9)); travel(pkt2, p2, seg(t, 1.6, 2.8));
+    op(res, seg(t, 2.9, 3.2)); travel(doc, back(p2), seg(t, 3.1, 4.3));
+    const st = t >= 4.4; vis(stored, st); vis(cFull, st); vis(cEmpty, !st); op(missTag, seg(t, 1.1, 1.4) * (1 - seg(t, 4.3, 4.5)));
+    travel(doc2, back(p1), seg(t, 4.6, 5.3)); op(ok, seg(t, 5.3, 5.6));
+    op(u2, seg(t, 5.7, 6.0)); d3.reveal(seg(t, 5.9, 6.4)); op(hit, seg(t, 6.3, 6.6));
+  };
+});
+
+scene("revalidate", 6, (svg, w, h) => {
+  backdrop(svg, w, h);
+  const mx = 110, my = 36, mw = w - mx - 240, max = 360, xOf = a => mx + 4 + (mw - 8) * a / max;
+  centre(sprite(svg, "clock", null, 6), 54, my + 56);
+  T(svg, mx, my + 22, "age of /logo.png at the edge", {w:400, fill:C.muted});
+  pbox(svg, mx, my + 36, mw, 40, C.white, C.line, false);
+  const fill = R(svg, mx + 4, my + 40, 0, 32, C.jade2);
+  R(svg, Math.round(xOf(300)) - 2, my + 30, 4, 52, C.line);
+  T(svg, xOf(300), my + 110, "max-age 300 s", {anchor:"middle", fill:C.muted, w:400});
+  const ageT = T(svg, mx + mw + 20, my + 66, "0 s", {size:26});
+  const ly = Math.round(h * .64), ex = 190, ox = w - 160;
+  centre(sprite(svg, "server", null, 8), ex, ly); T(svg, ex, ly + 90, "edge", {anchor:"middle"});
+  centre(sprite(svg, "server", null, 9), ox, ly); T(svg, ox, ly + 96, "origin", {anchor:"middle"});
+  const p = [[ex + 56, ly - 20], [ox - 60, ly - 20]], d = dots(svg, p, C.muted);
+  const q = tag(svg, (ex + ox) / 2, ly - 104, 'GET /logo.png · If-None-Match: "v7"', {anchor:"middle"});
+  const r = tag(svg, (ex + ox) / 2, ly + 18, "304 Not Modified · no body", {anchor:"middle", ...good});
+  const pkt = sprite(svg, "mail", null, 5), small = sprite(svg, "mail", null, 3);
+  const note = T(svg, w / 2, h - 26, "Had the file changed: 200 OK with the new body and a new ETag.", {anchor:"middle", fill:C.muted, w:400});
+  return t => {
+    const a = t < 4.8 ? Math.round(330 * clamp((t - .2) / 1.8)) : 0, stale = a > 300;
+    fill.setAttribute("width", Math.round(xOf(a) - mx - 4)); fill.setAttribute("fill", stale ? C.red : C.jade2);
+    ageT.textContent = t >= 4.8 ? "0 s · fresh" : stale ? `${a} s · stale` : `${a} s`; ageT.setAttribute("fill", stale ? C.red : t >= 4.8 ? C.good : C.ink);
+    d.reveal(seg(t, 2.1, 2.5)); op(q, seg(t, 2.2, 2.5)); travel(pkt, p, seg(t, 2.4, 3.4));
+    op(r, seg(t, 3.6, 3.9)); travel(small, back(p), seg(t, 3.8, 4.6));
+    op(note, seg(t, 5.2, 5.5));
+  };
+});
+
+scene("bars", 3.4, (svg, w, h) => {
+  backdrop(svg, w, h);
+  const x0 = 32, bw = w - 64, rh = Math.floor((h - 90) / 3);
+  const rows = [["cache hit", "edge only", C.jade2, .16], ["revalidated (304)", "edge + origin, headers only", C.gold, .55], ["cache miss", "edge + origin + full file", C.red, 1]];
+  const bars = rows.map(([name, sub, col, f], i) => {
+    const y = 28 + i * rh;
+    T(svg, x0, y + 28, name, {size:26});
+    pbox(svg, x0, y + 44, bw, 44, C.white, C.line, false);
+    const b = R(svg, x0 + 4, y + 48, 0, 36, col);
+    T(svg, x0, y + 122, sub, {fill:C.muted, w:400});
+    return {b, f};
+  });
+  T(svg, x0, h - 24, "Illustrative, not to scale.", {fill:C.muted, w:400});
+  return t => bars.forEach(({b, f}, i) => b.setAttribute("width", Math.round((bw - 8) * f * seg(t, .3 + i * .6, 1.0 + i * .6))));
+});
+</script>
+</body>
+</html>

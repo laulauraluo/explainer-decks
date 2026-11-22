@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Message Queue Explainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ===== block-deck theme: toy blocks on a warm table ===== */
+:root{
+  --floor:#f8f2e8; --letterbox:#e7dac4; --ink:#2d2a35; --muted:#6e6878; --grid:#eadfcd;
+  --head:'Fredoka',ui-rounded,'SF Pro Rounded','Arial Rounded MT Bold',system-ui,sans-serif;
+  --body:'Nunito',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+html,body{margin:0;height:100%;background:var(--letterbox);overflow:hidden}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;
+  background:var(--floor);color:var(--ink);font-family:var(--body)}
+#stage>section{position:absolute;inset:0;box-sizing:border-box;padding:64px 112px 56px;
+  display:flex;flex-direction:column;visibility:hidden}
+#stage>section.on{visibility:visible}
+.kicker{font:800 24px/1 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+h1{font:600 64px/1.08 var(--head);margin:0;max-width:1480px;letter-spacing:-.005em}
+.cover h1{font-size:88px}
+.lede{font:600 30px/1.4 var(--body);color:var(--muted);margin:14px 0 0;max-width:1480px}
+.scene{position:relative;flex:1;min-height:0;margin:12px 0}
+.scene>svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:hidden}
+.tags{position:absolute;inset:0;pointer-events:none}
+.cap{font:700 26px/1.4 var(--body);margin:0;max-width:1560px}
+.cap em{font-style:normal;background:#fff3c4;border-radius:8px;padding:0 6px}
+.row{display:flex;gap:48px;flex:1;min-height:0}
+.row>.scene{margin:12px 0}
+.notes{width:560px;flex:none;align-self:center;margin:0;padding:0;list-style:none}
+.notes li{font:600 30px/1.4 var(--body);margin:0 0 26px;padding-left:44px;position:relative}
+.notes li::before{content:'';position:absolute;left:0;top:10px;width:24px;height:24px;border-radius:7px;background:var(--dot,#f4c843)}
+.notes b{font-weight:800}
+/* word labels pinned to blocks */
+.tag{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;white-space:nowrap;--c:var(--ink)}
+.tag b{font:800 24px/1 var(--body);color:var(--ink);background:#fff;border:3px solid var(--c);border-radius:999px;padding:9px 18px 10px;box-shadow:0 4px 0 rgba(45,42,53,.12)}
+.tag i{position:relative;display:block;width:3px;background:var(--c);height:var(--stem,56px)}
+.tag i::after{content:'';position:absolute;left:-4px;bottom:-5px;width:11px;height:11px;border-radius:50%;background:var(--c)}
+/* controls */
+#ui{position:absolute;top:28px;right:40px;display:flex;align-items:center;gap:10px;font:800 22px/1 var(--body);color:var(--muted);z-index:5}
+#ui button{font:inherit;color:var(--ink);background:#fff;border:2px solid #e0d3bf;border-radius:999px;padding:8px 16px;cursor:pointer}
+#ui button:hover{border-color:var(--ink)}
+#bd-lint{position:absolute;left:0;right:0;top:0;z-index:9;background:#d6334a;color:#fff;font:700 22px/1.35 var(--body);padding:10px 24px;white-space:pre-wrap}
+.bd-bad{outline:4px solid #d6334a!important;outline-offset:2px}
+@media print{
+  @page{size:1920px 1080px;margin:0}
+  html,body{height:auto;overflow:visible;background:var(--floor)}
+  #stage{position:static;transform:none!important;height:auto;overflow:visible}
+  #stage>section{position:relative;width:1920px;height:1080px;visibility:visible;overflow:hidden;break-after:page;page-break-after:always}
+  #stage>section:last-of-type{break-after:auto;page-break-after:auto}
+  #ui,#bd-lint{display:none}
+  /* vector PDF: blurred shadows would be rasterised, so print them flat */
+  #stage svg [filter]{filter:none} #stage svg [mask]{mask:none} .tag b{box-shadow:none}
+}
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- ===== SLIDES: one <section id> per slide; .scene boxes get a block scene with the same id ===== -->
+
+<section id="cover" class="cover">
+  <p class="kicker">Explainer &middot; message queues</p>
+  <h1>How a message queue decouples services</h1>
+  <div class="scene"></div>
+  <p class="cap">Producers and consumers never call each other. Both only talk to the queue.</p>
+</section>
+
+<section id="push">
+  <p class="kicker">1 &middot; Producers</p>
+  <h1>Producers push messages and move on</h1>
+  <div class="scene"></div>
+  <p class="cap">Each service appends a message to the <em>tail</em> of the queue and returns at once. It does not wait for anyone to process it.</p>
+</section>
+
+<section id="pull">
+  <p class="kicker">2 &middot; Consumers</p>
+  <h1>Consumers pull at their own pace</h1>
+  <div class="scene"></div>
+  <p class="cap">A worker asks for the next message only when it is free. Each message goes to one worker, taken from the <em>head</em> of the queue.</p>
+</section>
+
+<section id="slow">
+  <p class="kicker">3 &middot; Backlog</p>
+  <h1>A slow consumer does not block producers</h1>
+  <div class="scene"></div>
+  <p class="cap">The producer keeps sending 2 messages a second; the worker takes 1 every 2 seconds. The backlog waits in the queue, so watch <em>queue depth</em>.</p>
+</section>
+
+<section id="ack">
+  <p class="kicker">4 &middot; Acknowledgement</p>
+  <h1>No ack, no delete: the message comes back</h1>
+  <div class="scene"></div>
+  <p class="cap">A delivered message is hidden, not deleted, until the worker acks it. If the worker dies and the <em>visibility timeout</em> runs out, the queue delivers it again.</p>
+</section>
+
+<section id="takeaway">
+  <p class="kicker">Takeaway</p>
+  <h1>Put a queue between services that should not wait on each other</h1>
+  <div class="row">
+    <div class="scene"></div>
+    <ul class="notes">
+      <li style="--dot:#f17868"><b>Producers stay fast:</b> they only append.</li>
+      <li style="--dot:#52c0b4"><b>Consumers scale alone:</b> add workers to drain a backlog.</li>
+      <li style="--dot:#f4c843"><b>Failures retry:</b> unacked messages come back.</li>
+      <li style="--dot:#9a7fe5"><b>At-least-once:</b> a message can arrive twice, so make handlers idempotent.</li>
+    </ul>
+  </div>
+</section>
+<div id="ui"><button id="prev" aria-label="Previous slide">&lsaquo;</button><span id="pg">1 / 1</span><button id="replay">Replay</button><button id="next" aria-label="Next slide">&rsaquo;</button></div>
+</div>
+
+<script>
+/* ===== block-deck engine + iso kit (written for block-deck; no external code) ===== */
+(function(){
+'use strict';
+var NS='http://www.w3.org/2000/svg', INK='#2d2a35';
+// each hue: [top, left, right] = light, mid, dark
+var HUES={
+  coral:['#ff9d8f','#f17868','#d35a4d'], tangerine:['#ffc27a','#f5a24c','#d68330'],
+  sun:['#ffe07c','#f4c843','#d6a82a'],   leaf:['#a6de90','#77c466','#58a54b'],
+  teal:['#88dcd2','#52c0b4','#379f94'],  sky:['#a0caff','#6aa3f0','#4c83d1'],
+  grape:['#c3abf8','#9a7fe5','#7a60c6'], rose:['#ffb0d2','#f283b2','#d26392'],
+  cream:['#fffaf2','#efe3d0','#dccbb1'], stone:['#d3d5dc','#adb1bd','#8b909e']
+};
+function tones(h){ return Array.isArray(h)?h:(HUES[h]||HUES.cream); }
+function el(tag,a,parent){ var e=document.createElementNS(NS,tag); for(var k in a) e.setAttribute(k,a[k]); if(parent) parent.appendChild(e); return e; }
+// ---- projection: x runs right-down, y runs left-down, z up (true isometric, 30 degrees) ----
+var CX=Math.cos(Math.PI/6);
+function iso(x,y,z){ return [(x-y)*CX,(x+y)/2-(z||0)]; }
+function pts(list){ return list.map(function(p){ var q=iso(p[0],p[1],p[2]); return q[0].toFixed(1)+','+q[1].toFixed(1); }).join(' '); }
+// ---- timing helpers (t in seconds) ----
+function clamp(v,a,b){ a=a==null?0:a; b=b==null?1:b; return Math.max(a,Math.min(b,v)); }
+function lerp(a,b,u){ return a+(b-a)*u; }
+function seg(t,a,b){ return clamp((t-a)/(b-a)); }
+function ease(t,a,b){ var u=seg(t,a,b); return u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2; }
+function pop(t,a,b){ var u=seg(t,a,b),c=1.70158; return u<=0?0:1+(c+1)*Math.pow(u-1,3)+c*Math.pow(u-1,2); }
+function hull(P){
+  P=P.slice().sort(function(a,b){return a[0]-b[0]||a[1]-b[1];});
+  function cr(o,a,b){return (a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);}
+  var lo=[],up=[],i;
+  for(i=0;i<P.length;i++){ while(lo.length>1&&cr(lo[lo.length-2],lo[lo.length-1],P[i])<=0) lo.pop(); lo.push(P[i]); }
+  for(i=P.length-1;i>=0;i--){ while(up.length>1&&cr(up[up.length-2],up[up.length-1],P[i])<=0) up.pop(); up.push(P[i]); }
+  return lo.slice(0,-1).concat(up.slice(0,-1));
+}
+// long soft shadow: footprint smeared away from a light at the upper left
+function shadowPts(foot,top){
+  var s=Math.max(top,0)*0.85, P=[];
+  foot.forEach(function(f){ P.push(iso(f[0],f[1],0)); P.push(iso(f[0]+0.9*s,f[1]-0.3*s,0)); });
+  return hull(P).map(function(q){return q[0].toFixed(1)+','+q[1].toFixed(1);}).join(' ');
+}
+var FACE={'stroke-width':5,'stroke-linejoin':'round'};
+function face(g){ return el('polygon',FACE,g); }
+function paint(poly,c,list){ poly.setAttribute('points',pts(list)); poly.setAttribute('fill',c); poly.setAttribute('stroke',c); }
+function addPiece(S,H){ S.list.push(H); return H; }
+function setVis(g,o){ g.setAttribute('opacity',o.toFixed(3)); g.style.display=o<=0.002?'none':''; }
+
+// block(S,{x,y,z,w,d,h,hue,o,base,shadow,depth}) -> handle {set(), top(), p}
+function block(S,o){
+  var p=Object.assign({x:0,y:0,z:0,w:100,d:100,h:60,hue:'sky',o:1,base:false,shadow:true},o);
+  var g=el('g',{},p.base?S.bases:S.pieces), L=face(g), R=face(g), T=face(g);
+  var E=el('polyline',{fill:'none',stroke:'#fff','stroke-opacity':.55,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'},g);
+  var sh=p.shadow?el('polygon',{fill:INK,filter:'url(#'+S.fid+')'},p.base?S.baseShadows:S.shadows):null;
+  var H={p:p,g:g,
+    set:function(q){ Object.assign(p,q); draw(); return H; },
+    top:function(){ return [p.x+p.w/2,p.y+p.d/2,p.z+p.h]; },
+    depth:function(){ return p.depth!=null?p.depth:p.x+p.w/2+p.y+p.d/2+p.z+p.h/2; },
+    foot:function(){ return [[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.d],[p.x,p.y+p.d]]; },
+    base:p.base};
+  function draw(){
+    var x=p.x,y=p.y,z=p.z,w=p.w,d=p.d,t=z+Math.max(p.h,0),c=tones(p.hue);
+    paint(L,c[1],[[x,y+d,z],[x+w,y+d,z],[x+w,y+d,t],[x,y+d,t]]);
+    paint(R,c[2],[[x+w,y,z],[x+w,y+d,z],[x+w,y+d,t],[x+w,y,t]]);
+    paint(T,c[0],[[x,y,t],[x+w,y,t],[x+w,y+d,t],[x,y+d,t]]);
+    E.setAttribute('points',pts([[x+3,y+d,t],[x+w,y+d,t],[x+w,y+3,t]]));
+    setVis(g,p.o);
+    if(sh){ sh.setAttribute('points',shadowPts(H.foot(),t)); setVis(sh,0.13*p.o); }
+  }
+  draw(); return addPiece(S,H);
+}
+// slab: a thin base plate (board, tray, road tile); drawn under all normal pieces
+function slab(S,o){ return block(S,Object.assign({h:16,hue:'cream',base:true},o)); }
+// cylinder(S,{x,y,z,r,h,hue,sides}) centred on (x,y); polygonal prism
+function cylinder(S,o){
+  var p=Object.assign({x:0,y:0,z:0,r:50,h:60,hue:'sun',o:1,sides:20,base:false,shadow:true},o);
+  var g=el('g',{},p.base?S.bases:S.pieces), F=[], i;
+  for(i=0;i<p.sides;i++) F.push(face(g));
+  var T=face(g), sh=p.shadow?el('polygon',{fill:INK,filter:'url(#'+S.fid+')'},p.base?S.baseShadows:S.shadows):null;
+  var H={p:p,g:g,base:p.base,
+    set:function(q){ Object.assign(p,q); draw(); return H; },
+    top:function(){ return [p.x,p.y,p.z+p.h]; },
+    depth:function(){ return p.depth!=null?p.depth:p.x+p.y+p.z+p.h/2; },
+    foot:function(){ var a=[]; for(var j=0;j<p.sides;j++){ var u=j/p.sides*2*Math.PI; a.push([p.x+p.r*Math.cos(u),p.y+p.r*Math.sin(u)]); } return a; }};
+  function draw(){
+    var c=tones(p.hue), n=p.sides, z=p.z, t=z+Math.max(p.h,0), ring=H.foot();
+    for(var j=0;j<n;j++){
+      var a=ring[j], b=ring[(j+1)%n], m=(j+.5)/n*2*Math.PI, vis=Math.cos(m)+Math.sin(m)>0;
+      F[j].style.display=vis?'':'none'; if(!vis) continue;
+      paint(F[j],mix(c[2],c[1],clamp((Math.sin(m)-Math.cos(m)+1)/2)),[[a[0],a[1],z],[b[0],b[1],z],[b[0],b[1],t],[a[0],a[1],t]]);
+    }
+    paint(T,c[0],ring.map(function(q){return [q[0],q[1],t];}));
+    setVis(g,p.o);
+    if(sh){ sh.setAttribute('points',shadowPts(ring,t)); setVis(sh,0.13*p.o); }
+  }
+  draw(); return addPiece(S,H);
+}
+function mix(a,b,u){
+  var A=[1,3,5].map(function(i){return parseInt(a.slice(i,i+2),16);}), B=[1,3,5].map(function(i){return parseInt(b.slice(i,i+2),16);});
+  return '#'+A.map(function(v,i){return Math.round(lerp(v,B[i],u)).toString(16).padStart(2,'0');}).join('');
+}
+// stack(S,{n,axis:'z'|'x'|'y',gap,step,...block opts,hues}) -> {items, show(k), top()}
+function stack(S,o){
+  var p=Object.assign({n:3,axis:'z',gap:6,x:0,y:0,z:0,w:80,d:80,h:30,hue:'sun'},o);
+  var size={x:p.w,y:p.d,z:p.h}[p.axis], step=p.step!=null?p.step:size+p.gap, items=[], shown=p.n;
+  for(var i=0;i<p.n;i++){
+    var q=Object.assign({},p,{hue:p.hues?p.hues[i%p.hues.length]:p.hue}); q[p.axis]=p[p.axis]+i*step;
+    if(p.axis==='z'&&i>0) q.shadow=false;
+    items.push(block(S,q));
+  }
+  return {items:items,p:p,
+    show:function(k){ shown=k; items.forEach(function(b,i){ b.set({o:clamp(k-i)}); }); },
+    top:function(){ return items[Math.max(0,Math.min(items.length,Math.ceil(shown))-1)].top(); }};
+}
+// floorPath(S,[[x,y],...],{hue,width,arrow}) -> {at(u)->[x,y], len, set({o})}
+function floorPath(S,points,o){
+  var p=Object.assign({hue:'cream',width:26,arrow:true,o:1},o), c=tones(p.hue), g=el('g',{},S.floor);
+  var cum=[0], i;
+  for(i=1;i<points.length;i++) cum.push(cum[i-1]+Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]));
+  var len=cum[cum.length-1];
+  function at(u){
+    var s=clamp(u)*len;
+    for(var j=1;j<points.length;j++) if(s<=cum[j]||j===points.length-1){
+      var a=points[j-1],b=points[j],v=(s-cum[j-1])/((cum[j]-cum[j-1])||1);
+      return [lerp(a[0],b[0],v),lerp(a[1],b[1],v)];
+    }
+    return points[0].slice();
+  }
+  var line=points.slice(), AL=p.arrow?Math.min(46,len*.4):0;
+  if(p.arrow){
+    var e=points[points.length-1], s0=at(1-AL/len), dx=e[0]-s0[0], dy=e[1]-s0[1], n=Math.hypot(dx,dy)||1, hw=p.width*0.95;
+    line[line.length-1]=s0;
+    el('polygon',{points:pts([[e[0],e[1],0],[s0[0]-dy/n*hw,s0[1]+dx/n*hw,0],[s0[0]+dy/n*hw,s0[1]-dx/n*hw,0]]),fill:c[2],'fill-opacity':.75,stroke:c[2],'stroke-opacity':.75,'stroke-width':4,'stroke-linejoin':'round'},g);
+  }
+  el('polyline',{points:pts(line),fill:'none',stroke:c[1],'stroke-opacity':.5,'stroke-width':p.width,'stroke-linecap':'round','stroke-linejoin':'round'},g);
+  el('polyline',{points:pts(line),fill:'none',stroke:'#fff','stroke-opacity':.9,'stroke-width':4,'stroke-dasharray':'1 16','stroke-linecap':'round'},g);
+  S.paths.push(points);
+  var H={g:g,at:at,len:len,points:points,set:function(q){ Object.assign(p,q); setVis(g,p.o); return H; }};
+  setVis(g,p.o); return H;
+}
+// token(S,path,{hue,size,h}) -> block handle + at(u,lift): a small piece that rides a floorPath
+function token(S,path,o){
+  var p=Object.assign({hue:'sun',size:44,h:30},o);
+  var b=block(S,Object.assign({},p,{w:p.size,d:p.size}));
+  b.at=function(u,lift){ var q=path.at(u); return b.set({x:q[0]-p.size/2,y:q[1]-p.size/2,z:lift||0}); };
+  b.at(0); return b;
+}
+// tag(S,target,text,{stem,dx,hue,o}) -> HTML word label pinned to a handle (its top()) or a world point [x,y,z]
+function tag(S,target,text,o){
+  var p=Object.assign({stem:56,dx:0,hue:null,o:1,text:text,target:target},o);
+  var d=document.createElement('div'), b=document.createElement('b'), i=document.createElement('i');
+  d.className='tag'; d.append(b,i); S.tagLayer.appendChild(d);
+  var H={p:p,el:d,
+    set:function(q){ Object.assign(p,q); look(); return H; },
+    anchor:function(){ var w=typeof p.target.top==='function'?p.target.top():p.target; return iso(w[0],w[1],w[2]||0); },
+    place:function(){ var q=H.anchor(),k=S.cam; d.style.left=(q[0]*k.k+k.tx+p.dx).toFixed(1)+'px'; d.style.top=(q[1]*k.k+k.ty).toFixed(1)+'px'; }};
+  function look(){
+    var hue=p.hue||(p.target.p&&p.target.p.hue)||null;
+    d.style.setProperty('--c',hue?tones(hue)[2]:INK); d.style.setProperty('--stem',p.stem+'px');
+    if(b.textContent!==p.text) b.textContent=p.text;
+    d.style.opacity=p.o; d.style.display=p.o<=0.002?'none':'';
+  }
+  look(); S.tags.push(H); return H;
+}
+
+// ---- scene context ----
+var SCENES={}, FID=0;
+function scene(id,fn){ SCENES[id]=fn; }
+function makeCtx(box){
+  var W=box.clientWidth, H=box.clientHeight, n=FID++, fid='bd-soft-'+n;
+  var svg=el('svg',{viewBox:'0 0 '+W+' '+H,'aria-hidden':'true'}); box.prepend(svg);
+  var defs=el('defs',{},svg), f=el('filter',{id:fid,x:'-30%',y:'-30%',width:'160%',height:'160%'},defs); el('feGaussianBlur',{stdDeviation:7},f);
+  // grid fades out toward the box edges (spotlight on the table)
+  var rg=el('radialGradient',{id:'bd-fade-'+n,cx:.5,cy:.5,r:.62},defs);
+  el('stop',{offset:.5,'stop-color':'#fff'},rg); el('stop',{offset:1,'stop-color':'#000'},rg);
+  el('rect',{width:W,height:H,fill:'url(#bd-fade-'+n+')'},el('mask',{id:'bd-mask-'+n,maskUnits:'userSpaceOnUse',x:0,y:0,width:W,height:H},defs));
+  var grid=el('g',{},el('g',{mask:'url(#bd-mask-'+n+')'},svg)), cam=el('g',{},svg), world=el('g',{},cam);
+  var tl=document.createElement('div'); tl.className='tags'; box.appendChild(tl);
+  return {box:box,svg:svg,W:W,H:H,fid:fid,cam:{k:1,tx:0,ty:0},camG:cam,grid:grid,world:world,
+    floor:el('g',{},world),baseShadows:el('g',{},world),bases:el('g',{},world),shadows:el('g',{},world),pieces:el('g',{},world),
+    tagLayer:tl,list:[],paths:[],tags:[],zoom:parseFloat(box.dataset.zoom)||1.4};
+}
+// painter's order: re-sort by depth (x+y+z of the centre); bases always under pieces
+function sortPieces(S){
+  [[S.bases,true],[S.pieces,false]].forEach(function(gr){
+    var hs=S.list.filter(function(h){return !!h.base===gr[1];}).sort(function(a,b){return a.depth()-b.depth();});
+    var kids=gr[0].children, same=hs.length===kids.length&&hs.every(function(h,i){return kids[i]===h.g;});
+    if(!same) hs.forEach(function(h){ gr[0].appendChild(h.g); });
+  });
+}
+function render(s,t){
+  if(!s.S) return;
+  s.upd(clamp(t,0,s.dur)); sortPieces(s.S); s.S.tags.forEach(function(h){h.place();});
+}
+// floor grid patch under the pieces (not counted in the camera fit)
+function drawGrid(S){
+  var G=60, x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  function add(x,y){ x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y); }
+  S.list.forEach(function(h){ h.foot().forEach(function(q){add(q[0],q[1]);}); });
+  S.paths.forEach(function(ps){ ps.forEach(function(q){add(q[0],q[1]);}); });
+  if(x0===Infinity) return;
+  var m=3*G; x0=Math.floor((x0-m)/G)*G; y0=Math.floor((y0-m)/G)*G; x1=Math.ceil((x1+m)/G)*G; y1=Math.ceil((y1+m)/G)*G;
+  S.grid.innerHTML='';
+  var a={stroke:'#eadfcd','stroke-width':2,'vector-effect':'non-scaling-stroke','stroke-linecap':'round'};
+  for(var x=x0;x<=x1;x+=G) el('polyline',Object.assign({points:pts([[x,y0,0],[x,y1,0]])},a),S.grid);
+  for(var y=y0;y<=y1;y+=G) el('polyline',Object.assign({points:pts([[x0,y,0],[x1,y,0]])},a),S.grid);
+}
+// camera fit: scale + centre the scene so pieces AND tags fit the box over the whole timeline
+function fitCam(s){
+  var S=s.S, N=s.dur>0?16:0, bb=null, tg=[], i;
+  for(i=0;i<=N;i++){
+    render(s,N?s.dur*i/N:0);
+    var b=S.world.getBBox();
+    if(b.width>0) bb=bb?{x0:Math.min(bb.x0,b.x),y0:Math.min(bb.y0,b.y),x1:Math.max(bb.x1,b.x+b.width),y1:Math.max(bb.y1,b.y+b.height)}:{x0:b.x,y0:b.y,x1:b.x+b.width,y1:b.y+b.height};
+    S.tags.forEach(function(h){ if(h.p.o>0.002){ var q=h.anchor(); tg.push({x:q[0],y:q[1],w:h.el.offsetWidth+2*Math.abs(h.p.dx),h:h.el.offsetHeight}); } });
+  }
+  if(!bb) return;
+  var M=16, k=Math.min(S.zoom,(S.W-2*M)/(bb.x1-bb.x0),(S.H-2*M)/(bb.y1-bb.y0)), e;
+  function ext(k){
+    var e={l:bb.x0*k,r:bb.x1*k,t:bb.y0*k,b:bb.y1*k};
+    tg.forEach(function(q){ e.l=Math.min(e.l,q.x*k-q.w/2); e.r=Math.max(e.r,q.x*k+q.w/2); e.t=Math.min(e.t,q.y*k-q.h); });
+    return e;
+  }
+  for(i=0;i<60;i++){ e=ext(k); if(e.r-e.l<=S.W-2*M&&e.b-e.t<=S.H-2*M) break; k*=0.97; }
+  S.cam={k:k,tx:S.W/2-(e.l+e.r)/2,ty:S.H/2-(e.t+e.b)/2};
+  var tr='translate('+S.cam.tx.toFixed(1)+','+S.cam.ty.toFixed(1)+') scale('+k.toFixed(4)+')';
+  S.camG.setAttribute('transform',tr); S.grid.setAttribute('transform',tr);
+  drawGrid(S);
+}
+
+// ---- deck engine: slides, keys, replay, #s=N&t=T, reduced motion ----
+var SL=[], cur=0, raf=0, frozen=false, checking=false;
+var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+function show(i,t0){
+  cur=clamp(i,0,SL.length-1);
+  SL.forEach(function(s,k){ s.node.classList.toggle('on',k===cur); if(k!==cur) render(s,s.dur); });
+  document.getElementById('pg').textContent=(cur+1)+' / '+SL.length;
+  cancelAnimationFrame(raf);
+  var s=SL[cur];
+  if(t0!=null){ render(s,t0); if(checking) lint(s); return; }
+  if(reduce||!s.S){ render(s,s.dur); return; }
+  var start=performance.now();
+  (function tick(now){ var t=(now-start)/1000; render(s,t); if(t<s.dur) raf=requestAnimationFrame(tick); })(start);
+}
+function unfreeze(){ if(frozen){ frozen=false; history.replaceState(null,'',location.pathname+location.search); } }
+function fromHash(){
+  var h=new URLSearchParams(location.hash.slice(1));
+  checking=h.has('check');
+  if(!h.has('s')){ show(cur); return; }
+  var n=(parseInt(h.get('s'),10)||1)-1, s=SL[clamp(n,0,SL.length-1)], t=h.get('t');
+  frozen=t!=null;
+  show(n,frozen?(t==='end'?s.dur:parseFloat(t)||0):null);
+}
+function fitStage(){
+  var st=document.getElementById('stage'), k=Math.min(innerWidth/1920,innerHeight/1080);
+  st.style.transform='translate('+((innerWidth-1920*k)/2)+'px,'+((innerHeight-1080*k)/2)+'px) scale('+k+')';
+}
+// ---- checks (#...&check): type floor, overlapping or clipped text, titles; paints a red banner ----
+function lint(s){
+  var old=document.getElementById('bd-lint'); if(old) old.remove();
+  document.querySelectorAll('.bd-bad').forEach(function(e){e.classList.remove('bd-bad');});
+  var bad=[], sec=s.node.getBoundingClientRect(), stK=sec.width/1920, items=[];
+  var h1=s.node.querySelector('h1'); if(!h1||!h1.textContent.trim()) bad.push('no visible title (h1)');
+  var w=document.createTreeWalker(s.node,NodeFilter.SHOW_TEXT,null), n;
+  while((n=w.nextNode())){
+    if(!n.textContent.trim()) continue;
+    var e=n.parentElement; if(!e.getClientRects().length) continue;
+    var fs=parseFloat(getComputedStyle(e).fontSize), inSvg=!!e.closest('svg');
+    if(inSvg) fs*=s.S?s.S.cam.k:1;
+    var floor=e.closest('.tag')||inSvg?22:e.closest('.cap,.kicker')?24:28;
+    if(fs<floor-0.01){ bad.push('"'+n.textContent.trim().slice(0,40)+'" is '+fs.toFixed(1)+'px, floor '+floor+'px'); e.classList.add('bd-bad'); }
+    var r=document.createRange(); r.selectNodeContents(n);
+    var box=(e.closest('.tag')?e:r).getBoundingClientRect();
+    if(box.left<sec.left-1||box.right>sec.right+1||box.top<sec.top-1||box.bottom>sec.bottom+1){ bad.push('"'+n.textContent.trim().slice(0,40)+'" is clipped by the slide edge'); e.classList.add('bd-bad'); }
+    items.push({e:e,b:box,txt:n.textContent.trim()});
+  }
+  for(var i=0;i<items.length;i++) for(var j=i+1;j<items.length;j++){
+    var A=items[i],B=items[j]; if(A.e===B.e||A.e.contains(B.e)||B.e.contains(A.e)) continue;
+    var ox=Math.min(A.b.right,B.b.right)-Math.max(A.b.left,B.b.left), oy=Math.min(A.b.bottom,B.b.bottom)-Math.max(A.b.top,B.b.top);
+    if(ox>2*stK&&oy>2*stK){ bad.push('"'+A.txt.slice(0,30)+'" overlaps "'+B.txt.slice(0,30)+'"'); A.e.classList.add('bd-bad'); B.e.classList.add('bd-bad'); }
+  }
+  if(s.S&&s.S.cam.k<0.45) bad.push('scene scaled to '+s.S.cam.k.toFixed(2)+'x: too many or too large pieces for the box');
+  if(!bad.length){ console.log('block-deck check: slide '+(cur+1)+' ok'); return; }
+  var div=document.createElement('div'); div.id='bd-lint'; div.textContent='CHECK slide '+(cur+1)+': '+bad.join(' | ');
+  document.getElementById('stage').appendChild(div); console.warn(div.textContent);
+}
+function boot(){
+  SL=[].slice.call(document.querySelectorAll('#stage > section')).map(function(node){ return {node:node,S:null,dur:0}; });
+  SL.forEach(function(s){
+    var fn=SCENES[s.node.id], box=s.node.querySelector('.scene');
+    if(!fn) return;
+    if(!box){ console.warn('scene "'+s.node.id+'" has no .scene box'); return; }
+    s.S=makeCtx(box); var r=fn(s.S)||{}; s.upd=r.update||function(){}; s.dur=r.dur||0;
+    fitCam(s); render(s,s.dur);
+  });
+  Object.keys(SCENES).forEach(function(id){ if(!document.getElementById(id)) console.warn('scene "'+id+'" has no <section id>'); });
+  addEventListener('keydown',function(e){
+    if(e.metaKey||e.ctrlKey||e.altKey) return;
+    var k=e.key;
+    if(k==='ArrowRight'||k==='PageDown'||k===' '){ e.preventDefault(); unfreeze(); show(cur+1); }
+    else if(k==='ArrowLeft'||k==='PageUp'){ e.preventDefault(); unfreeze(); show(cur-1); }
+    else if(k==='Home'){ unfreeze(); show(0); } else if(k==='End'){ unfreeze(); show(SL.length-1); }
+    else if(k==='r'||k==='R'){ unfreeze(); show(cur); }
+  });
+  document.getElementById('next').onclick=function(){ unfreeze(); show(cur+1); };
+  document.getElementById('prev').onclick=function(){ unfreeze(); show(cur-1); };
+  document.getElementById('replay').onclick=function(){ unfreeze(); show(cur); };
+  addEventListener('resize',fitStage); fitStage();
+  addEventListener('hashchange',fromHash);
+  addEventListener('beforeprint',function(){ cancelAnimationFrame(raf); SL.forEach(function(s){render(s,s.dur);}); });
+  fromHash();
+  // web fonts change tag widths: re-fit once they are in
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(function(){ SL.forEach(function(s){ if(s.S) fitCam(s); render(s,s.dur); }); fromHash(); });
+}
+window.BD={iso:iso,block:block,slab:slab,stack:stack,cylinder:cylinder,floorPath:floorPath,token:token,tag:tag,scene:scene,
+  ease:ease,pop:pop,seg:seg,lerp:lerp,clamp:clamp,mix:mix,HUES:HUES};
+document.addEventListener('DOMContentLoaded',boot);
+})();
+</script>
+
+<script>
+/* ===== SCENES: scene(sectionId, function(S){ build pieces; return {dur, update(t)} }) ===== */
+var {block,slab,stack,cylinder,floorPath,token,tag,scene,ease,pop,seg,lerp,mix,HUES}=BD;
+
+// ---- queue kit for this deck. Flow runs along -y (screen: lower-left to upper-right),
+// so every arrow ends on a visible face. Tray: x 0..110, head at the low-y end. ----
+var MX=80, MY=64, MH=44, GAP=16, TZ=18, CX=55, NEVER=999;
+function tray(S,y0,slots){
+  var len=slots*(MY+GAP)+GAP+8, t=slab(S,{x:0,y:y0,w:110,d:len,h:TZ});
+  t.y0=y0; t.y1=y0+len; t.slotY=function(i){ return y0+GAP+4+i*(MY+GAP); };
+  t.head=[CX,t.slotY(0)+MY/2];
+  return t;
+}
+function msg(S,hue){ return block(S,{w:MX,d:MY,h:MH,hue:hue||'sun',o:0}); }
+function route(S,pts){ return floorPath(S,pts,{o:0,arrow:false}); }   // invisible path a message rides
+function service(S,x,y,hue){ return block(S,{x:x,y:y,w:150,d:150,h:120,hue:hue}); }
+function at(m,p,z,o){ m.set({o:o==null?1:o,x:p[0]-MX/2,y:p[1]-MY/2,z:z}); }
+// m = {b, te: time it lands in the queue, td: time it leaves, inn: route from producer, out: route to consumer}
+function flow(T,ms,t){
+  ms.forEach(function(m){
+    var ahead=0;
+    ms.forEach(function(n){ if(n.te<m.te) ahead+=1-ease(t,n.td,n.td+.45); });
+    var slot=[CX,T.slotY(ahead)+MY/2];
+    if(t<m.te){
+      if(!m.inn||t<m.te-0.9){ m.b.set({o:0}); return; }
+      at(m.b,m.inn.at(ease(t,m.te-0.9,m.te)),0); return;
+    }
+    if(t<m.td){
+      var k=m.inn?ease(t,m.te,m.te+.4):1, e=m.inn?m.inn.at(1):slot;
+      at(m.b,[lerp(e[0],slot[0],k),lerp(e[1],slot[1],k)],lerp(0,TZ,k)+26*Math.sin(Math.PI*k)); return;
+    }
+    var v=ease(t,m.td,m.td+.8);
+    at(m.b,m.out.at(v),TZ*(1-v)+30*Math.sin(Math.PI*v),1-seg(t,m.td+.7,m.td+1));
+  });
+}
+function depthAt(ms,t){ return ms.filter(function(m){ return m.te<=t&&t<m.td; }).length; }
+// two consumers above the head of the queue, left (A) and right (B)
+function twoWorkers(S,T,ha,hb){
+  var yc=T.y0-330, A=service(S,-300,yc,ha), B=service(S,300,yc,hb);
+  var pa=floorPath(S,[[35,T.y0-14],[35,T.y0-80],[-225,T.y0-80],[-225,yc+164]],{hue:ha});
+  var pb=floorPath(S,[[75,T.y0-14],[75,T.y0-80],[375,T.y0-80],[375,yc+164]],{hue:hb});
+  return {A:A,B:B,yc:yc,pa:pa,pb:pb};
+}
+
+scene('cover',function(S){
+  var T=tray(S,0,4), P=service(S,-20,T.y1+170,'coral'), C=service(S,-20,-320,'teal');
+  var inn=floorPath(S,[[CX,T.y1+156],[CX,T.y1+14]],{hue:'coral'});
+  floorPath(S,[[CX,-14],[CX,-156]],{hue:'teal'});
+  var out=route(S,[T.head,[CX,-14],[CX,-170]]);
+  var te=[.6,1.2,1.8,2.4,3.0], td=[1.6,2.6,3.6,NEVER,NEVER];
+  var ms=te.map(function(x,i){ return {b:msg(S),te:x,td:td[i],inn:inn,out:out}; });
+  tag(S,P,'producer'); tag(S,[CX,T.y1-40,TZ],'queue',{hue:'sun',stem:90}); tag(S,C,'consumer');
+  return {dur:4.6,update:function(t){ flow(T,ms,t); }};
+});
+
+scene('push',function(S){
+  var T=tray(S,0,6), yp=T.y1+260, A=service(S,-340,yp,'coral'), B=service(S,300,yp,'tangerine');
+  var ia=floorPath(S,[[-265,yp-14],[-265,T.y1+90],[25,T.y1+90],[25,T.y1+14]],{hue:'coral'});
+  var ib=floorPath(S,[[375,yp-14],[375,T.y1+90],[85,T.y1+90],[85,T.y1+14]],{hue:'tangerine'});
+  var ms=[0,1,2,3,4,5].map(function(i){ return {b:msg(S,i%2?'tangerine':'coral'),te:1.2+i*.75,td:NEVER,inn:i%2?ib:ia}; });
+  tag(S,A,'checkout service'); tag(S,B,'signup service');
+  tag(S,[CX,T.y0+10,TZ+MH],'head',{hue:'sun',stem:70}); tag(S,[CX,T.y1-10,TZ+MH],'tail',{hue:'sun',stem:70});
+  return {dur:6.2,update:function(t){ flow(T,ms,t); }};
+});
+
+scene('pull',function(S){
+  var T=tray(S,0,6), W=twoWorkers(S,T,'teal','sky');
+  var ra=route(S,[T.head].concat(W.pa.points)), rb=route(S,[T.head].concat(W.pb.points));
+  var td=[.8,1.6,2.6,3.6,4.4,NEVER], who=[ra,rb,ra,rb,ra,ra];
+  var ms=td.map(function(d,i){ return {b:msg(S),te:-10+i,td:d,out:who[i]}; });
+  tag(S,W.A,'email worker'); tag(S,W.B,'billing worker');
+  tag(S,[CX,T.y1-10,TZ],'queue',{hue:'sun',stem:70});
+  return {dur:5.6,update:function(t){ flow(T,ms,t); }};
+});
+
+scene('slow',function(S){
+  var T=tray(S,0,8), P=service(S,-20,T.y1+170,'coral'), C=service(S,-20,-320,'teal');
+  var inn=floorPath(S,[[CX,T.y1+156],[CX,T.y1+14]],{hue:'coral'});
+  floorPath(S,[[CX,-14],[CX,-156]],{hue:'teal'});
+  var out=route(S,[T.head,[CX,-14],[CX,-170]]);
+  var td=[1.4,3.4,5.4];
+  var ms=[0,1,2,3,4,5,6,7,8,9].map(function(i){ return {b:msg(S),te:.6+i*.5,td:td[i]||NEVER,inn:inn,out:out}; });
+  tag(S,P,'producer: 2 per second'); tag(S,C,'slow worker: 1 every 2 s');
+  // depth tag rides the newest message in the queue (the tail), or the tray when empty
+  var dt=tag(S,T,'',{hue:'sun',stem:70});
+  return {dur:6.4,update:function(t){
+    flow(T,ms,t);
+    var q=ms.filter(function(m){ return m.te<=t&&t<m.td; });
+    dt.set({text:'queue depth: '+q.length,target:q.length?q[q.length-1].b:T});
+  }};
+});
+
+scene('ack',function(S){
+  var T=tray(S,0,4), W=twoWorkers(S,T,'teal','sky'), A=W.A, B=W.B, yt=W.yc+75;
+  var ra=route(S,[T.head].concat(W.pa.points,[[-225,yt]])), rb=route(S,[T.head].concat(W.pb.points,[[375,yt]]));
+  var timer=cylinder(S,{x:-230,y:T.y1-60,r:50,h:90,hue:'grape'});
+  var m1=msg(S), m2=msg(S), m3=msg(S);
+  var tA=tag(S,A,'worker A'), tB=tag(S,B,'worker B'), tT=tag(S,timer,'visibility timeout');
+  var t1=tag(S,m1,'m1',{stem:36,hue:'sun'});
+  function hop(m,r,u,z0,z1){ var p=r.at(u); at(m,p,lerp(z0,z1,u)+40*Math.sin(Math.PI*u)); }
+  function slot(m,s){ at(m,[CX,T.slotY(s)+MY/2],TZ); }
+  return {dur:6.6,update:function(t){
+    // worker A crashes at 2.0: greys out and slumps
+    var dead=ease(t,2.0,2.5), AH=lerp(120,70,dead);
+    A.set({h:AH,hue:HUES.teal.map(function(c,i){ return mix(c,HUES.stone[i],dead); })});
+    var onA=t>=1.4&&t<3.6;
+    tA.set({text:dead>.5?(onA?'worker A crashed, m1 unacked':'worker A crashed'):(onA?'worker A: m1 in flight':'worker A'),hue:dead>.5?'stone':'teal'});
+    // m1: head -> A (in flight) -> back to the head after the timeout -> B -> ack, deleted
+    if(t<.6) slot(m1,0);
+    else if(t<1.4) hop(m1,ra,ease(t,.6,1.4),TZ,120);
+    else if(t<3.6) at(m1,[-225,yt],AH);
+    else if(t<4.3) hop(m1,ra,1-ease(t,3.6,4.3),TZ,AH);
+    else if(t<4.6) slot(m1,0);
+    else if(t<5.4) hop(m1,rb,ease(t,4.6,5.4),TZ,120);
+    else at(m1,[375,yt],120);
+    m1.set({hue:t>=5.6?'leaf':'sun',o:1-seg(t,6.0,6.3)});
+    // m1's own tag only while it is in the queue or moving; on a worker the worker's tag names it
+    t1.set({o:onA||t>=5.4?0:1,text:t>=3.6?'m1 again':'m1'});
+    tB.set({text:t>=5.6?'worker B: ack, m1 deleted':t>=5.4?'worker B: m1 in flight':'worker B'});
+    // m2, m3 move up when m1 leaves, back when it returns
+    var s=1-ease(t,.6,1.05)+ease(t,3.9,4.3)-ease(t,4.6,5.05);
+    slot(m2,s); slot(m3,s+1);
+    // the timeout drains while m1 sits unacked with A; a new one starts for B's delivery
+    timer.set({h:lerp(90,6,ease(t,1.4,3.6))+84*ease(t,5.4,5.7)});
+    tT.set({text:t>=3.4&&t<4.4?'timeout: redeliver':'visibility timeout'});
+  }};
+});
+
+scene('takeaway',function(S){
+  // pillars step along +x and -y together, so they stand side by side on screen
+  var P=[[0,0,2,'coral'],[230,-230,4,'teal'],[460,-460,3,'sun']].map(function(q){
+    slab(S,{x:q[0]-30,y:q[1]-30,w:210,d:210});
+    return stack(S,{x:q[0],y:q[1],n:q[2],w:150,d:150,h:46,hue:q[3]});
+  });
+  var a=P[0], b=P[1], c=P[2];
+  tag(S,a,'fast'); tag(S,b,'scales'); tag(S,c,'retries');
+  return {dur:2.4,update:function(t){ a.show(2*ease(t,.2,1)); b.show(4*ease(t,.5,1.8)); c.show(3*ease(t,.8,1.9)); }};
+});
+</script>
+</body>
+</html>
