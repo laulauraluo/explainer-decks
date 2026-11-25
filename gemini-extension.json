@@ -1,5 +1,5 @@
 {
   "name": "explainer-decks",
   "version": "0.1.0",
-  "description": "Animated explainer slide decks in two styles: pixel-deck and block-deck. One HTML file per deck, PNG and PDF export."
+  "description": "Animated explainer slide decks in two styles: pixel-deck and workshop-deck. One HTML file per deck, PNG and PDF export."
 }

@@ -1,6 +1,6 @@
 # Install and use in each agent
 
-This repository holds two [Agent Skills](https://agentskills.io/specification), `skills/pixel-deck/` and `skills/block-deck/`, each a folder with a `SKILL.md` at its root. Install either or both. Every agent below loads that folder as is. Nothing is rewritten per agent; only the install path and the way you call it differ.
+This repository holds two [Agent Skills](https://agentskills.io/specification), `skills/pixel-deck/` and `skills/workshop-deck/`, each a folder with a `SKILL.md` at its root. Install either or both. Every agent below loads that folder as is. Nothing is rewritten per agent; only the install path and the way you call it differ.
 
 Paths were checked against each agent's own documentation on 2026-11-15. Agents change these quickly. If a path here disagrees with the linked page, the page wins, and an [issue](https://github.com/laulauraluo/explainer-decks/issues/new?template=bug_report.yml) is welcome.
 
@@ -42,19 +42,19 @@ For a project install, commit the folder so your team gets it too.
 
 | Agent | `-a` id | User folder | Project folder | How to call it | Source |
 |---|---|---|---|---|---|
-| **Claude Code** | `claude-code` | `~/.claude/skills/` | `.claude/skills/` | `/pixel-deck` or `/block-deck`, or just ask | [Skills](https://code.claude.com/docs/en/skills) |
-| **Codex** | `codex` | `~/.agents/skills/` | `.agents/skills/` | `$pixel-deck` or `$block-deck`, `/skills`, or just ask | [Build skills](https://learn.chatgpt.com/docs/build-skills) |
-| **GitHub Copilot** (VS Code, CLI, coding agent) | `github-copilot` | `~/.copilot/skills/` or `~/.agents/skills/` | `.github/skills/`, `.agents/skills/` or `.claude/skills/` | `/pixel-deck` or `/block-deck` in VS Code and the CLI; the coding agent loads it when relevant | [VS Code](https://code.visualstudio.com/docs/copilot/customization/agent-skills), [GitHub](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills) |
-| **Cursor** | `cursor` | `~/.cursor/skills/` or `~/.agents/skills/` | `.cursor/skills/` or `.agents/skills/` | `/pixel-deck` or `/block-deck`, or just ask | [Skills](https://cursor.com/docs/context/skills) |
+| **Claude Code** | `claude-code` | `~/.claude/skills/` | `.claude/skills/` | `/pixel-deck` or `/workshop-deck`, or just ask | [Skills](https://code.claude.com/docs/en/skills) |
+| **Codex** | `codex` | `~/.agents/skills/` | `.agents/skills/` | `$pixel-deck` or `$workshop-deck`, `/skills`, or just ask | [Build skills](https://learn.chatgpt.com/docs/build-skills) |
+| **GitHub Copilot** (VS Code, CLI, coding agent) | `github-copilot` | `~/.copilot/skills/` or `~/.agents/skills/` | `.github/skills/`, `.agents/skills/` or `.claude/skills/` | `/pixel-deck` or `/workshop-deck` in VS Code and the CLI; the coding agent loads it when relevant | [VS Code](https://code.visualstudio.com/docs/copilot/customization/agent-skills), [GitHub](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills) |
+| **Cursor** | `cursor` | `~/.cursor/skills/` or `~/.agents/skills/` | `.cursor/skills/` or `.agents/skills/` | `/pixel-deck` or `/workshop-deck`, or just ask | [Skills](https://cursor.com/docs/context/skills) |
 | **Gemini CLI** | `gemini-cli` | `~/.gemini/skills/` or `~/.agents/skills/` | `.gemini/skills/` or `.agents/skills/` | Just ask; it asks to activate the skill. `/skills list` shows it | [Skills](https://geminicli.com/docs/cli/skills/) |
-| **Antigravity** | `antigravity` | `~/.gemini/config/skills/` | `.agents/skills/` | `/pixel-deck` or `/block-deck`, or just ask | [Skills](https://antigravity.google/docs/skills.md) |
+| **Antigravity** | `antigravity` | `~/.gemini/config/skills/` | `.agents/skills/` | `/pixel-deck` or `/workshop-deck`, or just ask | [Skills](https://antigravity.google/docs/skills.md) |
 | **OpenCode** | `opencode` | `~/.config/opencode/skills/` | `.opencode/skills/` (also reads `.claude/skills/`, `.agents/skills/`) | Just ask, or mention `@pixel-deck` | [Skills](https://opencode.ai/docs/skills/) |
-| **Windsurf** (docs now under Devin Desktop) | `windsurf` | `~/.config/devin/skills/` or `~/.agents/skills/` | `.devin/skills/`, `.agents/skills/` or `.windsurf/skills/` | `/pixel-deck` or `/block-deck`, or just ask | [Skills](https://docs.devin.ai/desktop/cascade/skills) |
-| **Cline** | `cline` | `~/.cline/skills/` | `.cline/skills/` or `.claude/skills/` | `/pixel-deck` or `/block-deck`, or just ask | [Skills](https://docs.cline.bot/customization/skills) |
+| **Windsurf** (docs now under Devin Desktop) | `windsurf` | `~/.config/devin/skills/` or `~/.agents/skills/` | `.devin/skills/`, `.agents/skills/` or `.windsurf/skills/` | `/pixel-deck` or `/workshop-deck`, or just ask | [Skills](https://docs.devin.ai/desktop/cascade/skills) |
+| **Cline** | `cline` | `~/.cline/skills/` | `.cline/skills/` or `.claude/skills/` | `/pixel-deck` or `/workshop-deck`, or just ask | [Skills](https://docs.cline.bot/customization/skills) |
 | **Roo Code** | `roo` | `~/.roo/skills/` or `~/.agents/skills/` | `.roo/skills/` or `.agents/skills/` | Just ask (no slash command for skills) | [Skills](https://roocodeinc.github.io/Roo-Code/features/skills) |
-| **Kiro** | `kiro-cli` | `~/.kiro/skills/` | `.kiro/skills/` | `/pixel-deck` or `/block-deck`, or just ask | [Skills](https://kiro.dev/docs/skills/) |
+| **Kiro** | `kiro-cli` | `~/.kiro/skills/` | `.kiro/skills/` | `/pixel-deck` or `/workshop-deck`, or just ask | [Skills](https://kiro.dev/docs/skills/) |
 | **Amp** | `amp` | `~/.config/agents/skills/` or `~/.agents/skills/` | `.agents/skills/` | Just ask | [Skills](https://ampcode.com/docs/markdown/customize/skills) |
-| **Junie** | `junie` | `~/.junie/skills/` | `.junie/skills/` | `/pixel-deck` or `/block-deck`, or just ask | [Skills](https://junie.jetbrains.com/docs/agent-skills.html) |
+| **Junie** | `junie` | `~/.junie/skills/` | `.junie/skills/` | `/pixel-deck` or `/workshop-deck`, or just ask | [Skills](https://junie.jetbrains.com/docs/agent-skills.html) |
 | **Zed** | `zed` | `~/.agents/skills/` | `.agents/skills/` (trusted worktrees only) | The `/` menu, `@pixel-deck`, or just ask | [Skills](https://zed.dev/docs/ai/skills) |
 
 Notes:
